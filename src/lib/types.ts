@@ -165,3 +165,83 @@ export interface CompanyNodeData {
   company: CompanyInfo;
   parentNodeId: string;
 }
+
+// KG literature-overlay types (materialized by enrich.py, served by /api/kg)
+export type KgEntityKind = 'paper' | 'device' | 'finding';
+
+export interface KgPaperRef {
+  paperId: string;
+  title?: string | null;
+  year?: number | null;
+  conference?: string | null;
+  sessionCode?: string | null;
+  authors?: string[];
+  institute?: string | null;
+  studyKind?: string | null;
+}
+
+export interface KgEntity {
+  id: string;
+  kind: KgEntityKind;
+  name: string;
+  summary?: string;
+  relation?: string;
+  paper?: KgPaperRef;
+  device?: {
+    majorRadius?: string | null;
+    minorRadius?: string | null;
+    magneticFieldStrength?: string | null;
+    numberOfPeriods?: number | null;
+    configurationType?: string | null;
+  };
+}
+
+export interface KgExpandResponse {
+  entities: KgEntity[];
+  meta: {
+    enriched?: boolean;
+    resolved_entity?: string;
+    paper_count?: number;
+    truncated?: boolean;
+    [key: string]: unknown;
+  };
+}
+
+export interface KgMeasurement {
+  parameter?: string | null;
+  value?: string | null;
+  unit?: string | null;
+  diagnostic?: string | null;
+}
+
+export interface KgExperiment {
+  name?: string | null;
+  device?: string | null;
+  heatingMethods?: { name?: string | null; frequency?: string | null; power?: string | null; pulseDuration?: string | null }[];
+  findings?: (string | null)[];
+  measurements?: KgMeasurement[];
+  scalabilityClaims?: { statement?: string | null; limit?: string | null }[];
+  constraints?: (string | null)[];
+  instabilities?: { name?: string | null; observed?: boolean }[];
+}
+
+export interface KgPaperDossier {
+  paperId: string;
+  title?: string | null;
+  authors?: string[];
+  presenters?: string[];
+  institute?: { name?: string | null; city?: string | null } | null;
+  conference?: { name?: string | null; year?: number | null; location?: string | null; session?: string | null } | null;
+  studyKind?: string | null;
+  originalLanguage?: string | null;
+  numPages?: number | null;
+  experiments?: KgExperiment[];
+  excerpts?: string[];
+}
+
+export interface LiteratureNodeData {
+  label: string;
+  nodeType: 'literature';
+  entity: KgEntity;
+  parentNodeId: string;
+}

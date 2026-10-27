@@ -21,7 +21,13 @@ interface GroupSelectorProps {
   searchInput: string;
   onSearchChange: (value: string) => void;
   onEnterEditMode: () => void;
+  onOpenReview?: () => void;
   isEditing: boolean;
+  hasLiterature?: boolean;
+  litViewMode?: 'overview' | 'focused';
+  onLitViewModeChange?: (mode: 'overview' | 'focused') => void;
+  showLitEdgeLabels?: boolean;
+  onToggleLitEdgeLabels?: (show: boolean) => void;
   showLegend: boolean;
   showOptions: boolean;
   onToggleLegend: () => void;
@@ -40,7 +46,13 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
   searchInput,
   onSearchChange,
   onEnterEditMode,
+  onOpenReview,
   isEditing,
+  hasLiterature,
+  litViewMode,
+  onLitViewModeChange,
+  showLitEdgeLabels,
+  onToggleLitEdgeLabels,
   showLegend,
   showOptions,
   onToggleLegend,
@@ -168,9 +180,40 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
               </Select>
             </div>
 
+            {/* Literature view mode — only when KG enrichment exists */}
+            {hasLiterature && litViewMode && onLitViewModeChange && (
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="lit-view-mode"
+                  className="text-sm font-medium text-gray-700 whitespace-nowrap"
+                >
+                  Literature:
+                </label>
+                <Select value={litViewMode} onValueChange={onLitViewModeChange}>
+                  <SelectTrigger className="w-48" id="lit-view-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="overview">Overview</SelectItem>
+                    <SelectItem value="focused">Focused</SelectItem>
+                  </SelectContent>
+                </Select>
+                {onToggleLitEdgeLabels && (
+                  <label className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap">
+                    <input
+                      type="checkbox"
+                      checked={!!showLitEdgeLabels}
+                      onChange={(e) => onToggleLitEdgeLabels(e.target.checked)}
+                    />
+                    edge labels
+                  </label>
+                )}
+              </div>
+            )}
+
             {/* Edit Graph Button - Hidden on mobile */}
             {!isEditing && (
-              <div className="pt-2 border-t border-gray-200 hidden md:block">
+              <div className="pt-2 border-t border-gray-200 hidden md:block space-y-2">
                 <Button
                   variant="outline"
                   size="default"
@@ -179,6 +222,16 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
                 >
                   Edit Tree
                 </Button>
+                {onOpenReview && (
+                  <Button
+                    variant="outline"
+                    size="default"
+                    onClick={onOpenReview}
+                    className="w-full"
+                  >
+                    Review Literature
+                  </Button>
+                )}
               </div>
             )}
           </div>

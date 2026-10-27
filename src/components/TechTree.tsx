@@ -1,7 +1,7 @@
 'use client';
 
 import { getLayoutedElements } from '@/lib/elkjs';
-import { HighlightedElements, UiNode, GroupingMode, CompanyInfo, CompanyNodeData } from '@/lib/types';
+import { HighlightedElements, UiNode, GroupingMode, CompanyInfo, CompanyNodeData, KgEntity, KgExpandResponse, KgPaperDossier, LiteratureNodeData } from '@/lib/types';
 import { TopicKey } from '@/lib/topicConfig';
 import {
   Background,
@@ -20,6 +20,9 @@ import { KnowledgeBaseSelector } from './KnowledgeBaseSelector';
 import { CustomNode } from './CustomNode';
 import { CompanyNode } from './CompanyNode';
 import { MoreCompaniesNode, MoreCompaniesNodeData } from './MoreCompaniesNode';
+import { LiteratureNode } from './LiteratureNode';
+import PaperDetails from './PaperDetails';
+import LiteratureReview from './LiteratureReview';
 import TabPanel from './TabPanel';
 import EditInterface from './EditInterface';
 import { useTechTree } from '@/hooks/useTechTree';
@@ -68,6 +71,18 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
   const [companyNodes, setCompanyNodes] = useState<UiNode[]>([]);
   const [companyEdges, setCompanyEdges] = useState<Edge[]>([]);
   const [expandedCompanyNodeIds, setExpandedCompanyNodeIds] = useState<Set<string>>(new Set());
+
+  // Literature (KG) overlay state
+  const [literatureNodes, setLiteratureNodes] = useState<UiNode[]>([]);
+  const [literatureEdges, setLiteratureEdges] = useState<Edge[]>([]);
+  const [expandedLiteratureNodeIds, setExpandedLiteratureNodeIds] = useState<Set<string>>(new Set());
+  const [paperDossier, setPaperDossier] = useState<KgPaperDossier | null>(null);
+  const [showReview, setShowReview] = useState(false);
+  const [showLitEdgeLabels, setShowLitEdgeLabels] = useState(false);
+  // 'overview': lit nodes on top of the full tree; 'focused': only parent + lit nodes
+  const [litViewMode, setLitViewMode] = useState<'overview' | 'focused'>('overview');
+  // nodeId -> {papers, weakMatch} for nodes that actually have KG enrichment
+  const [enrichedNodes, setEnrichedNodes] = useState<Map<string, { papers: number; weakMatch: boolean }>>(new Map());
  
   // Category filtering state
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -126,6 +141,15 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     }
   };
 
+  const handleOpenReview = () => {
+    const password = prompt('Please enter the admin password:');
+    if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+      setShowReview(true);
+    } else if (password !== null) {
+      alert('Incorrect password.');
+    }
+  };
+
   // Function to find connected nodes and edges
   const findConnectedElements = useCallback(
     (nodeId: string, allEdges: Edge[]) => {
@@ -155,12 +179,44 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     setSearchTerm(searchInput);
   }, [searchInput, searchTerm]);
 
+  // Fetch which nodes have KG literature (icon gating), once per topic.
+  const refreshEnrichedNodes = useCallback(() => {
+    fetch(`/investment-tech-tree/api/kg?topic=${topic}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.enrichedNodes) return;
+        setEnrichedNodes(
+          new Map(
+            d.enrichedNodes.map((n: { nodeId: string; papers: number; weakMatch: boolean }) => [
+              n.nodeId,
+              { papers: n.papers, weakMatch: n.weakMatch },
+            ]),
+          ),
+        );
+      })
+      .catch(() => {});
+  }, [topic]);
+
+  useEffect(() => {
+    refreshEnrichedNodes();
+  }, [refreshEnrichedNodes]);
+
+  // Smoothly refit when entering or leaving focused literature mode.
+  const litFocused =
+    litViewMode === 'focused' && expandedLiteratureNodeIds.size > 0;
+  useEffect(() => {
+    fitView({ duration: 400, padding: 0.35 });
+  }, [litFocused, fitView]);
+
   // Clear company overlay whenever the ELK layout is about to regenerate
   // so company nodes don't linger at stale positions.
   useEffect(() => {
     setCompanyNodes([]);
     setCompanyEdges([]);
     setExpandedCompanyNodeIds(new Set());
+    setLiteratureNodes([]);
+    setLiteratureEdges([]);
+    setExpandedLiteratureNodeIds(new Set());
   }, [techTree, groupingMode, showingRelatedNodes, showOnlyConnected, searchTerm, selectedCategory]);
 
   useEffect(() => {
@@ -389,6 +445,162 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     [nodes, topic, expandedCompanyNodeIds, MAX_VISIBLE_COMPANIES],
   );
 
+  const handleShowLiterature = useCallback(
+    async (nodeId: string) => {
+      if (expandedLiteratureNodeIds.has(nodeId)) {
+        // Toggle off
+        setLiteratureNodes((prev) =>
+          prev.filter(
+            (n) => (n.data as unknown as LiteratureNodeData).parentNodeId !== nodeId,
+          ),
+        );
+        setLiteratureEdges((prev) =>
+          prev.filter((e) => !e.id.startsWith(`lit-edge-${nodeId}-`)),
+        );
+        setExpandedLiteratureNodeIds((prev) => {
+          const next = new Set(prev);
+          next.delete(nodeId);
+          return next;
+        });
+        return;
+      }
+
+      // Collapse any previously expanded literature before showing new ones
+      setLiteratureNodes([]);
+      setLiteratureEdges([]);
+      setExpandedLiteratureNodeIds(new Set());
+
+      // update selected node and highlights when expanding a new node
+      const targetNode = nodes.find((n) => n.id === nodeId);
+      if (targetNode) {
+        setSelectedNode(() => ({ ...targetNode }));
+        const connected = findConnectedElements(nodeId, edges);
+        setHighlightedElements(connected);
+      }
+
+      try {
+        const res = await fetch(
+          `/investment-tech-tree/api/kg?nodeId=${encodeURIComponent(nodeId)}&topic=${topic}`,
+        );
+        if (!res.ok) return;
+        const data: KgExpandResponse = await res.json();
+        if (!data.entities?.length) return;
+
+        const parentNode = nodes.find((n) => n.id === nodeId);
+        if (!parentNode) return;
+
+        const litWidth = 160;
+        const litHeight = 80;
+        const litGap = 10;
+        // Literature nodes render to the RIGHT of the parent (companies go left).
+        const px = parentNode.position.x + 150 + 30;
+        const totalHeight =
+          data.entities.length * (litHeight + litGap) - litGap;
+        const startY = parentNode.position.y + 40 - totalHeight / 2;
+
+        const kindBorder: Record<string, string> = {
+          paper: '#6366f1',
+          device: '#14b8a6',
+          finding: '#f59e0b',
+        };
+
+        const newLitNodes: UiNode[] = data.entities.map((entity, index) => ({
+          id: `lit-${entity.id}`,
+          type: 'literature',
+          position: { x: px, y: startY + index * (litHeight + litGap) },
+          width: litWidth,
+          height: litHeight,
+          data: {
+            label:
+              entity.kind === 'paper'
+                ? (entity.paper?.title ?? entity.name)
+                : entity.name,
+            nodeType: 'literature',
+            entity,
+            parentNodeId: nodeId,
+          } as unknown as UiNode['data'],
+          style: {
+            background: '#ffffff',
+            borderColor: kindBorder[entity.kind] ?? '#94a3b8',
+            borderStyle: 'solid',
+            borderWidth: entity.kind === 'paper' ? '2px' : '1px',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+        }));
+
+        const newLitEdges: Edge[] = data.entities.map((entity) => {
+          const color = kindBorder[entity.kind] ?? '#94a3b8';
+          return {
+            id: `lit-edge-${nodeId}-${entity.id}`,
+            source: `lit-${entity.id}`,
+            target: nodeId,
+            label: entity.relation,
+            labelStyle: { fontSize: 9, fill: color },
+            labelBgStyle: { fill: '#ffffff', fillOpacity: 0.85 },
+            style: { strokeWidth: 1, stroke: color, strokeDasharray: '4 2' },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 16,
+              height: 16,
+              color,
+            },
+          };
+        });
+
+        setLiteratureNodes((prev) => [...prev, ...newLitNodes]);
+        setLiteratureEdges((prev) => [...prev, ...newLitEdges]);
+        setExpandedLiteratureNodeIds((prev) => new Set([...prev, nodeId]));
+      } catch (err) {
+        console.error('Error fetching KG literature:', err);
+      }
+    },
+    [nodes, edges, topic, expandedLiteratureNodeIds, findConnectedElements],
+  );
+
+  const handleShowPaper = useCallback(
+    async (entity: KgEntity) => {
+      const paperId = entity.paper?.paperId;
+      if (!paperId) return;
+      try {
+        const res = await fetch(
+          `/investment-tech-tree/api/kg/paper/${encodeURIComponent(paperId)}?topic=${topic}`,
+        );
+        if (!res.ok) return;
+        setPaperDossier(await res.json());
+      } catch (err) {
+        console.error('Error fetching paper dossier:', err);
+      }
+    },
+    [topic],
+  );
+
+  // Re-expand an open literature overlay after a curation verdict changed,
+  // and refresh the icon-availability map.
+  const handleVerdictChanged = useCallback(
+    (nodeId: string) => {
+      refreshEnrichedNodes();
+      if (!expandedLiteratureNodeIds.has(nodeId)) return;
+      setLiteratureNodes((prev) =>
+        prev.filter(
+          (n) => (n.data as unknown as LiteratureNodeData).parentNodeId !== nodeId,
+        ),
+      );
+      setLiteratureEdges((prev) =>
+        prev.filter((e) => !e.id.startsWith(`lit-edge-${nodeId}-`)),
+      );
+      setExpandedLiteratureNodeIds((prev) => {
+        const next = new Set(prev);
+        next.delete(nodeId);
+        return next;
+      });
+      setTimeout(() => handleShowLiterature(nodeId), 0);
+    },
+    [expandedLiteratureNodeIds, refreshEnrichedNodes, handleShowLiterature],
+  );
+
   const handleShowCompanyDetails = useCallback(
     (companyId: string) => {
       const companyNode = companyNodes.find(
@@ -532,7 +744,13 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
           searchInput={searchInput}
           onSearchChange={handleSearchChange}
           onEnterEditMode={handleEnterEditMode}
+          onOpenReview={handleOpenReview}
           isEditing={isEditing}
+          hasLiterature={enrichedNodes.size > 0}
+          litViewMode={litViewMode}
+          onLitViewModeChange={setLitViewMode}
+          showLitEdgeLabels={showLitEdgeLabels}
+          onToggleLitEdgeLabels={setShowLitEdgeLabels}
           showLegend={showLegend}
           showOptions={showOptions}
           onToggleLegend={() => setShowLegend(!showLegend)}
@@ -548,8 +766,28 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
         ) : (
           <div className="flex-grow relative">
             <ReactFlow
-              nodes={[...nodes, ...companyNodes]}
-              edges={[...edges, ...companyEdges]}
+              nodes={
+                // Focused mode: show only the expanded node + its literature.
+                litViewMode === 'focused' && expandedLiteratureNodeIds.size
+                  ? [
+                      ...nodes.filter((n) => expandedLiteratureNodeIds.has(n.id)),
+                      ...literatureNodes,
+                    ]
+                  : [...nodes, ...companyNodes, ...literatureNodes]
+              }
+              edges={(
+                litViewMode === 'focused' && expandedLiteratureNodeIds.size
+                  ? literatureEdges.filter((e) =>
+                      [...expandedLiteratureNodeIds].some((id) =>
+                        e.id.startsWith(`lit-edge-${id}-`),
+                      ),
+                    )
+                  : [...edges, ...companyEdges, ...literatureEdges]
+              ).map((e) =>
+                !showLitEdgeLabels && e.id.startsWith('lit-edge-')
+                  ? { ...e, label: undefined }
+                  : e,
+              )}
               nodeTypes={{
                 default: (props) => (
                   <CustomNode
@@ -558,8 +796,23 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
                     onShowConnected={handleShowConnected}
                     onShowCompanies={handleShowCompanies}
                     isCompaniesExpanded={(id) => expandedCompanyNodeIds.has(id)}
+                    onShowLiterature={
+                      enrichedNodes.has(props.id) ? handleShowLiterature : undefined
+                    }
+                    isLiteratureExpanded={(id) => expandedLiteratureNodeIds.has(id)}
+                    literatureCount={enrichedNodes.get(props.id)?.papers}
                   />
                 ),
+                literature: (props) => {
+                  const litData = props.data as unknown as LiteratureNodeData;
+                  return (
+                    <LiteratureNode
+                      {...props}
+                      data={litData}
+                      onShowPaper={handleShowPaper}
+                    />
+                  );
+                },
                 company: (props) => {
                   const companyData = props.data as unknown as CompanyNodeData;
                   return (
@@ -605,6 +858,20 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
             
             {/* Knowledge Base Selector - Positioned above Legend */}
             <KnowledgeBaseSelector topic={topic} onTopicChange={onTopicChange} />
+
+            {paperDossier && (
+              <PaperDetails
+                dossier={paperDossier}
+                onClose={() => setPaperDossier(null)}
+              />
+            )}
+            {showReview && (
+              <LiteratureReview
+                topic={topic}
+                onClose={() => setShowReview(false)}
+                onVerdictChanged={handleVerdictChanged}
+              />
+            )}
             
             {/* Legend */}
             <div className={`${showLegend ? 'block' : 'hidden'} md:block`}>
