@@ -26,6 +26,7 @@ import LiteratureReview from './LiteratureReview';
 import TabPanel from './TabPanel';
 import EditInterface from './EditInterface';
 import { useTechTree } from '@/hooks/useTechTree';
+import { setAdminPassword, verifyAdminPassword } from '@/lib/adminClient';
 
 // Suppress hydration warnings for Radix UI
 if (typeof window !== 'undefined') {
@@ -126,11 +127,13 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     );
   }
 
-  const handleEnterEditMode = () => {
+  const handleEnterEditMode = async () => {
     const password = prompt('Please enter the admin password:');
-    if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+    if (password === null) return;
+    if (await verifyAdminPassword(password)) {
+      setAdminPassword(password);
       setIsEditing(true);
-    } else if (password !== null) {
+    } else {
       alert('Incorrect password.');
     }
   };
@@ -141,11 +144,13 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     }
   };
 
-  const handleOpenReview = () => {
+  const handleOpenReview = async () => {
     const password = prompt('Please enter the admin password:');
-    if (password === process.env.NEXT_PUBLIC_ADMIN_PASSWORD) {
+    if (password === null) return;
+    if (await verifyAdminPassword(password)) {
+      setAdminPassword(password);
       setShowReview(true);
-    } else if (password !== null) {
+    } else {
       alert('Incorrect password.');
     }
   };

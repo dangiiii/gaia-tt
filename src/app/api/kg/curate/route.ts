@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { requireAdmin } from '@/lib/adminAuth';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 
 // POST {nodeId, entityId, verdict: 'accept'|'reject', topic} — human curation
 // verdicts live in kg_curations and are merged over kg_node_enrichment at
 // read time, so they survive enrichment rebuilds.
 export async function POST(request: NextRequest) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json();
     const { nodeId, entityId, verdict, topic } = body;

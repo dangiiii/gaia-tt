@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { requireAdmin } from '@/lib/adminAuth';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 
 // POST - Create a new edge
 export async function POST(request: NextRequest) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+
   try {
     const body = await request.json();
 

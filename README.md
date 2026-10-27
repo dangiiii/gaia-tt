@@ -171,7 +171,7 @@ src/
    NEXT_PUBLIC_ENVIRONMENT=development
    GEMINI_API_KEY=your_gemini_api_key_here
    MONGODB_URI=your_tech_tree_db_connection_string
-   NEXT_PUBLIC_ADMIN_PASSWORD=your_admin_password_here
+   ADMIN_PASSWORD=your_admin_password_here
    ```
 
 4. **Start development server**
@@ -190,7 +190,7 @@ src/
 | `NEXT_PUBLIC_ENVIRONMENT` | Environment mode (development/production) | Yes |
 | `NEXT_PUBLIC_GEMINI_API_KEY` | Google Gemini API key for chat functionality | Yes |
 | `MONGODB_URI` | Connection string for DB | Yes |
-| `NEXT_PUBLIC_ADMIN_PASSWORD` | Admin PWD for TT Edits | Yes |
+| `ADMIN_PASSWORD` | Admin PWD for TT Edits | Yes |
 
 ## Development
 
@@ -215,7 +215,7 @@ All technology tree data is stored in MongoDB Atlas. To modify the tech tree:
 
 **Using the Edit Interface:**
    - Click "Edit Tree" in the main interface
-   - Enter the admin password (set in `NEXT_PUBLIC_ADMIN_PASSWORD`)
+   - Enter the admin password (set in `ADMIN_PASSWORD`)
    - Use the edit interface to:
      - Add new nodes with required connections
      - Edit existing node properties
@@ -263,7 +263,7 @@ The application is optimized for desktop and tablet devices. Mobile phone users 
 3. Configure environment variables:
    - `NEXT_PUBLIC_GEMINI_API_KEY`
    - `MONGODB_URI`
-   - `NEXT_PUBLIC_ADMIN_PASSWORD`
+   - `ADMIN_PASSWORD`
    - `NEXT_PUBLIC_ENVIRONMENT=production`
 4. Deploy
 

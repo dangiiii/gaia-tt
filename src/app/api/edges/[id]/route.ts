@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
+import { requireAdmin } from '@/lib/adminAuth';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 
 // DELETE - Delete an edge
@@ -7,6 +8,9 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+
   try {
     const edgeId = params.id;
 

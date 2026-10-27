@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopicKey } from '@/lib/topicConfig';
+import { adminHeaders } from '@/lib/adminClient';
 
 interface ReviewItem {
   entityId: string;
@@ -61,7 +62,7 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
     try {
       const res = await fetch('/investment-tech-tree/api/kg/curate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({ nodeId, entityId, verdict, topic }),
       });
       if (!res.ok) return;

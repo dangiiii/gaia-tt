@@ -16,6 +16,7 @@ import { Loader2 } from 'lucide-react';
 import { NODE_LABELS, NodeLabel } from '@/lib/types';
 import { TopicKey } from '@/lib/topicConfig';
 import { useTechTree } from '@/hooks/useTechTree';
+import { adminHeaders } from '@/lib/adminClient';
 
 interface EditTechTreePanelProps {
   topic: TopicKey; // NEW: Accept topic prop
@@ -103,7 +104,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
       // First, create the node - include topic in body
       const nodeResponse = await fetch('/investment-tech-tree/api/nodes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({
           id: newNode.id,
           label: newNode.label,
@@ -127,7 +128,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
       if (newNode.edgeSource) {
         const edgeResponse = await fetch('/investment-tech-tree/api/edges', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
           body: JSON.stringify({
             source: newNode.edgeSource,
             target: newNode.id,
@@ -142,7 +143,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
       if (newNode.edgeTarget) {
         const edgeResponse = await fetch('/investment-tech-tree/api/edges', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
           body: JSON.stringify({
             source: newNode.id,
             target: newNode.edgeTarget,
@@ -192,7 +193,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
     try {
       const response = await fetch(`/investment-tech-tree/api/nodes/${editNodeSelection}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({
           ...editNode,
           references: editNode.references.split('\n').filter(r => r.trim()),
@@ -235,6 +236,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
       // Include topic in query params for DELETE
       const response = await fetch(`/investment-tech-tree/api/nodes/${deleteNodeSelection}?topic=${topic}`, {
         method: 'DELETE',
+        headers: adminHeaders(),
       });
 
       if (!response.ok) {
@@ -267,7 +269,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
     try {
       const response = await fetch('/investment-tech-tree/api/edges', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({
           ...newEdge,
           topic: topic, // Include topic
@@ -309,6 +311,7 @@ const EditTechTreePanel: React.FC<EditTechTreePanelProps> = ({ topic }) => {
       // Include topic in query params for DELETE
       const response = await fetch(`/investment-tech-tree/api/edges/${deleteEdgeSelection}?topic=${topic}`, {
         method: 'DELETE',
+        headers: adminHeaders(),
       });
 
       if (!response.ok) {
