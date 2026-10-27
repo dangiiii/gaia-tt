@@ -15,6 +15,7 @@ interface ReviewItem {
   llmVerdict: 'keep' | 'drop' | null;
   status: 'accepted' | 'rejected';
   curated: boolean;
+  curatedAt: string | null;
 }
 
 interface ReviewNode {
@@ -43,7 +44,8 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
   const [nodes, setNodes] = useState<ReviewNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [showRejectedOnly, setShowRejectedOnly] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'accepted' | 'rejected'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'manual' | 'ai'>('all');
 
   useEffect(() => {
     fetch(`/investment-tech-tree/api/kg/review?topic=${topic}`)
@@ -109,15 +111,25 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
               {counts.accepted} accepted · {counts.rejected} rejected — human verdicts persist across rebuilds
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-1 text-xs text-gray-600">
-              <input
-                type="checkbox"
-                checked={showRejectedOnly}
-                onChange={(e) => setShowRejectedOnly(e.target.checked)}
-              />
-              rejected only
-            </label>
+          <div className="flex items-center gap-2">
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+              className="text-xs border border-gray-300 rounded px-1.5 py-1"
+            >
+              <option value="all">all statuses</option>
+              <option value="accepted">accepted</option>
+              <option value="rejected">rejected</option>
+            </select>
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as typeof sourceFilter)}
+              className="text-xs border border-gray-300 rounded px-1.5 py-1"
+            >
+              <option value="all">manual + AI</option>
+              <option value="manual">manual</option>
+              <option value="ai">AI</option>
+            </select>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 text-xl leading-none"
@@ -134,9 +146,12 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
             <p className="text-sm text-gray-500">No enriched nodes yet.</p>
           )}
           {nodes.map((node) => {
-            const items = showRejectedOnly
-              ? node.items.filter((i) => i.status === 'rejected')
-              : node.items;
+            const items = node.items.filter(
+              (i) =>
+                (statusFilter === 'all' || i.status === statusFilter) &&
+                (sourceFilter === 'all' ||
+                  (sourceFilter === 'manual' ? i.curated : !i.curated)),
+            );
             if (!items.length) return null;
             return (
               <div key={node.nodeId}>
@@ -175,7 +190,12 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {it.curated && (
-                            <span className="text-[10px] text-gray-400 mr-1">manual</span>
+                            <span
+                              className="text-[10px] text-gray-400 mr-1"
+                              title={it.curatedAt ? new Date(it.curatedAt).toLocaleString() : undefined}
+                            >
+                              manual{it.curatedAt ? ` · ${new Date(it.curatedAt).toLocaleDateString()}` : ''}
+                            </span>
                           )}
                           <Button
                             variant={accepted ? 'default' : 'outline'}

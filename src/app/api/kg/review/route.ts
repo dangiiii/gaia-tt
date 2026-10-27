@@ -27,16 +27,28 @@ export async function GET(request: NextRequest) {
     ]);
 
     const verdicts = new Map(
-      curations.map((c) => [`${c.techTreeNodeId}::${c.entityId}`, c.verdict]),
+      curations.map((c) => [`${c.techTreeNodeId}::${c.entityId}`, c]),
     );
 
     const nodes = docs.map((doc) => {
       const items: any[] = [];
       for (const e of doc.entities ?? []) {
-        items.push({ ...toItem(e), status: verdicts.get(`${doc.techTreeNodeId}::${e.id}`) === 'reject' ? 'rejected' : 'accepted', curated: verdicts.has(`${doc.techTreeNodeId}::${e.id}`) });
+        const c = verdicts.get(`${doc.techTreeNodeId}::${e.id}`);
+        items.push({
+          ...toItem(e),
+          status: c?.verdict === 'reject' ? 'rejected' : 'accepted',
+          curated: !!c,
+          curatedAt: c?.updatedAt ?? null,
+        });
       }
       for (const e of doc.meta?.rejected ?? []) {
-        items.push({ ...toItem(e), status: verdicts.get(`${doc.techTreeNodeId}::${e.id}`) === 'accept' ? 'accepted' : 'rejected', curated: verdicts.has(`${doc.techTreeNodeId}::${e.id}`) });
+        const c = verdicts.get(`${doc.techTreeNodeId}::${e.id}`);
+        items.push({
+          ...toItem(e),
+          status: c?.verdict === 'accept' ? 'accepted' : 'rejected',
+          curated: !!c,
+          curatedAt: c?.updatedAt ?? null,
+        });
       }
       return { nodeId: doc.techTreeNodeId, nodeLabel: doc.nodeLabel, items };
     });
