@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
+import { KgExperiment } from '@/lib/types';
+import { experimentKeys, PAPER_PART_SCOPE } from '@/lib/kgKeys';
 
 // Serves one materialized paper dossier (kg_papers collection).
 export async function GET(
@@ -28,6 +30,23 @@ export async function GET(
     if (!dossier) {
       return NextResponse.json({ error: 'Paper not found' }, { status: 404 });
     }
+
+    // Attach stable per-experiment keys (computed over the full list, before
+    // filtering, so keys never shift) and hide experiments rejected by admins.
+    const experiments: KgExperiment[] = dossier.experiments ?? [];
+    const keys = experimentKeys(paperId, experiments);
+    const rejected = new Set(
+      (
+        await db
+          .collection('kg_curations')
+          .find({ techTreeNodeId: PAPER_PART_SCOPE, entityId: { $in: keys }, verdict: 'reject' })
+          .project({ entityId: 1 })
+          .toArray()
+      ).map((c) => c.entityId as string),
+    );
+    dossier.experiments = experiments
+      .map((e, i) => ({ ...e, voteKey: keys[i] }))
+      .filter((e) => !rejected.has(e.voteKey));
 
     return NextResponse.json(dossier);
   } catch (err) {

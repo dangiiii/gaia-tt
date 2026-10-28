@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { TopicKey } from '@/lib/topicConfig';
 import { adminHeaders } from '@/lib/adminClient';
+import { PAPER_PART_SCOPE } from '@/lib/kgKeys';
 
 interface ReviewItem {
   entityId: string;
@@ -17,6 +18,18 @@ interface ReviewItem {
   status: 'accepted' | 'rejected';
   curated: boolean;
   curatedAt: string | null;
+  votes: { up: number; down: number };
+  parts?: ReviewPart[];
+}
+
+/** A paper part (experiment), curated globally under the '*' scope. */
+interface ReviewPart {
+  partId: string;
+  label: string;
+  status: 'accepted' | 'rejected';
+  curated: boolean;
+  curatedAt: string | null;
+  votes: { up: number; down: number };
 }
 
 interface ReviewNode {
@@ -65,19 +78,31 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
         headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({ nodeId, entityId, verdict, topic }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        alert(`Verdict could not be saved: ${body.error ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      const patch = {
+        status: (verdict === 'accept' ? 'accepted' : 'rejected') as ReviewItem['status'],
+        curated: true,
+        curatedAt: new Date().toISOString(),
+      };
       setNodes((prev) =>
         prev.map((n) =>
-          n.nodeId !== nodeId
-            ? n
-            : {
+          nodeId === PAPER_PART_SCOPE
+            ? // Paper parts are global: update every occurrence of the part.
+              {
                 ...n,
                 items: n.items.map((it) =>
-                  it.entityId === entityId
-                    ? { ...it, status: verdict === 'accept' ? 'accepted' : 'rejected', curated: true }
+                  it.parts?.some((p) => p.partId === entityId)
+                    ? { ...it, parts: it.parts.map((p) => (p.partId === entityId ? { ...p, ...patch } : p)) }
                     : it,
                 ),
-              },
+              }
+            : n.nodeId !== nodeId
+              ? n
+              : { ...n, items: n.items.map((it) => (it.entityId === entityId ? { ...it, ...patch } : it)) },
         ),
       );
       onVerdictChanged(nodeId);
@@ -86,15 +111,67 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
     }
   };
 
-  const counts = nodes.reduce(
-    (acc, n) => {
-      n.items.forEach((it) =>
-        it.status === 'accepted' ? acc.accepted++ : acc.rejected++,
-      );
-      return acc;
-    },
-    { accepted: 0, rejected: 0 },
+  const matches = (x: { status: string; curated: boolean }) =>
+    (statusFilter === 'all' || x.status === statusFilter) &&
+    (sourceFilter === 'all' || (sourceFilter === 'manual' ? x.curated : !x.curated));
+
+  // An item is listed if it matches, or if any of its parts match (then only
+  // matching parts are shown under it).
+  const visibleNodes = nodes
+    .map((node) => ({
+      ...node,
+      items: node.items
+        .map((it) => ({ ...it, parts: (it.parts ?? []).filter(matches) }))
+        .filter((it) => matches(it) || it.parts.length),
+    }))
+    .filter((node) => node.items.length);
+
+  // Counts reflect the current filters, i.e. what is actually listed.
+  const counts = { accepted: 0, rejected: 0 };
+  visibleNodes.forEach((n) =>
+    n.items.forEach((it) => {
+      if (matches(it)) counts[it.status]++;
+      it.parts.forEach((p) => counts[p.status]++);
+    }),
   );
+  const filtered = statusFilter !== 'all' || sourceFilter !== 'all';
+
+  const renderVotes = (v: { up: number; down: number }) =>
+    (v.up > 0 || v.down > 0) && (
+      <div className="text-xs text-gray-500 mt-0.5">
+        👍 {v.up} · 👎 {v.down}
+      </div>
+    );
+
+  // "manual · date" stamp + Accept/Reject toggle, shared by items and paper parts.
+  const renderCuration = (
+    nodeId: string,
+    entityId: string,
+    x: { status: 'accepted' | 'rejected'; curated: boolean; curatedAt: string | null },
+  ) => {
+    const accepted = x.status === 'accepted';
+    return (
+      <div className="flex items-center gap-1 shrink-0">
+        {x.curated && (
+          <span
+            className="text-[10px] text-gray-400 mr-1"
+            title={x.curatedAt ? new Date(x.curatedAt).toLocaleString() : undefined}
+          >
+            manual{x.curatedAt ? ` · ${new Date(x.curatedAt).toLocaleDateString()}` : ''}
+          </span>
+        )}
+        <Button
+          variant={accepted ? 'default' : 'outline'}
+          size="sm"
+          className="h-7 px-2 text-xs"
+          disabled={busy === `${nodeId}::${entityId}`}
+          onClick={() => setVerdict(nodeId, entityId, accepted ? 'reject' : 'accept')}
+        >
+          {accepted ? 'Reject' : 'Accept'}
+        </Button>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -109,7 +186,8 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
           <div>
             <h2 className="text-lg font-semibold">Literature Curation</h2>
             <p className="text-xs text-gray-500">
-              {counts.accepted} accepted · {counts.rejected} rejected — human verdicts persist across rebuilds
+              {counts.accepted} accepted · {counts.rejected} rejected
+              {filtered ? ' (filtered)' : ''} — human verdicts persist across rebuilds
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -146,14 +224,11 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
           {!loading && !nodes.length && (
             <p className="text-sm text-gray-500">No enriched nodes yet.</p>
           )}
-          {nodes.map((node) => {
-            const items = node.items.filter(
-              (i) =>
-                (statusFilter === 'all' || i.status === statusFilter) &&
-                (sourceFilter === 'all' ||
-                  (sourceFilter === 'manual' ? i.curated : !i.curated)),
-            );
-            if (!items.length) return null;
+          {!loading && nodes.length > 0 && !visibleNodes.length && (
+            <p className="text-sm text-gray-500">No items match the current filters.</p>
+          )}
+          {visibleNodes.map((node) => {
+            const items = node.items;
             return (
               <div key={node.nodeId}>
                 <h3 className="text-sm font-semibold text-gray-800 mb-2">
@@ -162,54 +237,57 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
                 </h3>
                 <ul className="space-y-1">
                   {items.map((it) => {
-                    const key = `${node.nodeId}::${it.entityId}`;
                     const accepted = it.status === 'accepted';
                     return (
                       <li
                         key={it.entityId}
-                        className={`flex items-start gap-2 p-2 rounded-md border text-sm ${
+                        className={`p-2 rounded-md border text-sm ${
                           accepted
                             ? 'border-gray-200 bg-white'
                             : 'border-red-100 bg-red-50/40'
                         }`}
                       >
-                        <Badge className={`${KIND_BADGE[it.kind]} text-[10px] shrink-0 mt-0.5`}>
-                          {it.kind}
-                        </Badge>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-800 leading-snug">
-                            {it.title}
-                          </div>
-                          {it.meta && (
-                            <div className="text-xs text-gray-500">{it.meta}</div>
-                          )}
-                          {it.llmReason && (
-                            <div className="text-xs text-gray-400 italic mt-0.5">
-                              LLM {it.llmVerdict}: {it.llmReason}
+                        <div className="flex items-start gap-2">
+                          <Badge className={`${KIND_BADGE[it.kind]} text-[10px] shrink-0 mt-0.5`}>
+                            {it.kind}
+                          </Badge>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-800 leading-snug">
+                              {it.title}
                             </div>
-                          )}
+                            {it.meta && (
+                              <div className="text-xs text-gray-500">{it.meta}</div>
+                            )}
+                            {it.llmReason && (
+                              <div className="text-xs text-gray-400 italic mt-0.5">
+                                LLM {it.llmVerdict}: {it.llmReason}
+                              </div>
+                            )}
+                            {renderVotes(it.votes)}
+                          </div>
+                          {renderCuration(node.nodeId, it.entityId, it)}
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {it.curated && (
-                            <span
-                              className="text-[10px] text-gray-400 mr-1"
-                              title={it.curatedAt ? new Date(it.curatedAt).toLocaleString() : undefined}
-                            >
-                              manual{it.curatedAt ? ` · ${new Date(it.curatedAt).toLocaleDateString()}` : ''}
-                            </span>
-                          )}
-                          <Button
-                            variant={accepted ? 'default' : 'outline'}
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            disabled={busy === key}
-                            onClick={() =>
-                              setVerdict(node.nodeId, it.entityId, accepted ? 'reject' : 'accept')
-                            }
-                          >
-                            {accepted ? 'Reject' : 'Accept'}
-                          </Button>
-                        </div>
+
+                        {it.parts.length > 0 && (
+                          <ul className="mt-2 ml-6 space-y-1 border-l-2 border-indigo-100 pl-3">
+                            {it.parts.map((p) => (
+                              <li
+                                key={p.partId}
+                                className={`flex items-start gap-2 text-xs rounded px-1.5 py-1 ${
+                                  p.status === 'accepted' ? '' : 'bg-red-50/60'
+                                }`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className={p.status === 'accepted' ? 'text-gray-700' : 'text-gray-400 line-through'}>
+                                    {p.label}
+                                  </div>
+                                  {renderVotes(p.votes)}
+                                </div>
+                                {renderCuration(PAPER_PART_SCOPE, p.partId, p)}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </li>
                     );
                   })}

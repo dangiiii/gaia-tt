@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { requireAdmin } from '@/lib/adminAuth';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
+import { isExperimentKey, PAPER_PART_SCOPE } from '@/lib/kgKeys';
 
 // POST {nodeId, entityId, verdict: 'accept'|'reject', topic} — human curation
 // verdicts live in kg_curations and are merged over kg_node_enrichment at
@@ -16,6 +17,10 @@ export async function POST(request: NextRequest) {
 
     if (!nodeId || !entityId || !['accept', 'reject'].includes(verdict)) {
       return NextResponse.json({ error: 'Missing/invalid fields' }, { status: 400 });
+    }
+    // Paper parts (experiments) are curated globally under the '*' scope.
+    if (nodeId === PAPER_PART_SCOPE && !isExperimentKey(entityId)) {
+      return NextResponse.json({ error: 'Invalid paper part key' }, { status: 400 });
     }
     if (!topic || !TOPICS[topic as TopicKey]) {
       return NextResponse.json({ error: 'Invalid topic' }, { status: 400 });

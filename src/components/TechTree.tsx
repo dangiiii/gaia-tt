@@ -23,6 +23,7 @@ import { MoreCompaniesNode, MoreCompaniesNodeData } from './MoreCompaniesNode';
 import { LiteratureNode } from './LiteratureNode';
 import PaperDetails from './PaperDetails';
 import LiteratureReview from './LiteratureReview';
+import { VoteCounts, fetchVotes, optimisticVote } from '@/lib/votes';
 import TabPanel from './TabPanel';
 import EditInterface from './EditInterface';
 import { useTechTree } from '@/hooks/useTechTree';
@@ -80,6 +81,7 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
   const [paperDossier, setPaperDossier] = useState<KgPaperDossier | null>(null);
   const [showReview, setShowReview] = useState(false);
   const [showLitEdgeLabels, setShowLitEdgeLabels] = useState(false);
+  const [litVotes, setLitVotes] = useState<Map<string, VoteCounts>>(new Map());
   // 'overview': lit nodes on top of the full tree; 'focused': only parent + lit nodes
   const [litViewMode, setLitViewMode] = useState<'overview' | 'focused'>('overview');
   // nodeId -> {papers, weakMatch} for nodes that actually have KG enrichment
@@ -542,6 +544,7 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
             id: `lit-edge-${nodeId}-${entity.id}`,
             source: `lit-${entity.id}`,
             target: nodeId,
+            targetHandle: 'lit-target',
             label: entity.relation,
             labelStyle: { fontSize: 9, fill: color },
             labelBgStyle: { fill: '#ffffff', fillOpacity: 0.85 },
@@ -558,11 +561,32 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
         setLiteratureNodes((prev) => [...prev, ...newLitNodes]);
         setLiteratureEdges((prev) => [...prev, ...newLitEdges]);
         setExpandedLiteratureNodeIds((prev) => new Set([...prev, nodeId]));
+        // Fetch vote tallies for votable overlay entities (paper votes live in PaperDetails).
+        fetchVotes(
+          topic,
+          data.entities.filter((e) => e.kind !== 'paper').map((e) => e.id),
+        ).then((v) =>
+          setLitVotes((prev) => new Map([...prev, ...Object.entries(v)])),
+        );
       } catch (err) {
         console.error('Error fetching KG literature:', err);
       }
     },
     [nodes, edges, topic, expandedLiteratureNodeIds, findConnectedElements],
+  );
+
+  const handleLitVote = useCallback(
+    async (targetId: string, vote: 'up' | 'down' | null) => {
+      await optimisticVote(topic, targetId, vote, litVotes.get(targetId), (counts) =>
+        setLitVotes((prev) => {
+          const next = new Map(prev);
+          if (counts) next.set(targetId, counts);
+          else next.delete(targetId);
+          return next;
+        }),
+      );
+    },
+    [topic, litVotes],
   );
 
   const handleShowPaper = useCallback(
@@ -773,7 +797,7 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
             <ReactFlow
               nodes={
                 // Focused mode: show only the expanded node + its literature.
-                litViewMode === 'focused' && expandedLiteratureNodeIds.size
+                litFocused
                   ? [
                       ...nodes.filter((n) => expandedLiteratureNodeIds.has(n.id)),
                       ...literatureNodes,
@@ -781,7 +805,7 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
                   : [...nodes, ...companyNodes, ...literatureNodes]
               }
               edges={(
-                litViewMode === 'focused' && expandedLiteratureNodeIds.size
+                litFocused
                   ? literatureEdges.filter((e) =>
                       [...expandedLiteratureNodeIds].some((id) =>
                         e.id.startsWith(`lit-edge-${id}-`),
@@ -815,6 +839,8 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
                       {...props}
                       data={litData}
                       onShowPaper={handleShowPaper}
+                      votes={litVotes.get(litData.entity.id)}
+                      onVote={(v) => handleLitVote(litData.entity.id, v)}
                     />
                   );
                 },
@@ -867,6 +893,7 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
             {paperDossier && (
               <PaperDetails
                 dossier={paperDossier}
+                topic={topic}
                 onClose={() => setPaperDossier(null)}
               />
             )}

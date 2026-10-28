@@ -1,7 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { KgPaperDossier } from '@/lib/types';
+import { TopicKey } from '@/lib/topicConfig';
+import VoteButtons from './VoteButtons';
+import { VoteCounts, fetchVotes, optimisticVote } from '@/lib/votes';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -13,6 +16,7 @@ import {
 
 interface PaperDetailsProps {
   dossier: KgPaperDossier;
+  topic: TopicKey;
   onClose: () => void;
 }
 
@@ -26,8 +30,37 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) => {
+export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, topic, onClose }) => {
   const conf = dossier.conference;
+  const [votes, setVotes] = useState<Record<string, VoteCounts>>({});
+
+  // Vote targets: the paper itself + each experiment (keys attached by /api/kg/paper).
+  const targets = useMemo(
+    () => [
+      `paper:${dossier.paperId}`,
+      ...(dossier.experiments ?? []).flatMap((e) => (e.voteKey ? [e.voteKey] : [])),
+    ],
+    [dossier],
+  );
+
+  useEffect(() => {
+    fetchVotes(topic, targets).then(setVotes);
+  }, [topic, targets]);
+
+  const vote = (targetId: string, v: 'up' | 'down' | null) =>
+    optimisticVote(topic, targetId, v, votes[targetId], (counts) =>
+      setVotes((prev) => {
+        const next = { ...prev };
+        if (counts) next[targetId] = counts;
+        else delete next[targetId];
+        return next;
+      }),
+    );
+
+  // Plain render helper (not a component) so it doesn't remount on every render.
+  const renderVote = (k: string) => (
+    <VoteButtons counts={votes[k]} onVote={(v) => vote(k, v)} size="xs" />
+  );
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -45,13 +78,16 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
               </Badge>
               <CardTitle className="text-lg leading-snug">{dossier.title}</CardTitle>
             </div>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-xl leading-none"
-              aria-label="Close"
-            >
+            <div className="flex items-center gap-1">
+              {renderVote(`paper:${dossier.paperId}`)}
+              <button
+                onClick={onClose}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                aria-label="Close"
+              >
               ×
-            </button>
+              </button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -85,25 +121,28 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
           />
 
           {(dossier.experiments ?? []).map((exp, i) => (
-            <Accordion key={i} type="single" collapsible className="border rounded-md px-3">
+            <Accordion key={exp.voteKey ?? i} type="single" collapsible className="border rounded-md px-3">
               <AccordionItem value={`exp-${i}`}>
-                <AccordionTrigger className="text-sm font-medium">
-                  {exp.name || `Experiment ${i + 1}`}
-                  {exp.device ? ` — ${exp.device}` : ''}
-                </AccordionTrigger>
+                <div className="flex items-center gap-2">
+                  <AccordionTrigger className="text-sm font-medium flex-1 text-left">
+                    {exp.name || `Experiment ${i + 1}`}
+                    {exp.device ? ` — ${exp.device}` : ''}
+                  </AccordionTrigger>
+                  {exp.voteKey && renderVote(exp.voteKey)}
+                </div>
                 <AccordionContent className="space-y-3 text-sm">
                   {exp.heatingMethods?.filter((h) => h?.name).length ? (
                     <div>
                       <h5 className="font-semibold text-gray-700 mb-1">Heating methods</h5>
                       <ul className="list-disc list-inside space-y-1">
-                        {exp.heatingMethods.map((h, j) => (
+                        {exp.heatingMethods.map((h, j) => h?.name && (
                           <li key={j}>
                             <span className="font-medium">{h.name}</span>
                             {[h.frequency, h.power, h.pulseDuration]
                               .filter(Boolean)
                               .map((v) => ` (${v})`)
                               .join('')}
-                          </li>
+                                                      </li>
                         ))}
                       </ul>
                     </div>
@@ -112,8 +151,10 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
                     <div>
                       <h5 className="font-semibold text-gray-700 mb-1">Findings</h5>
                       <ul className="list-disc list-inside space-y-1">
-                        {exp.findings.filter(Boolean).map((f, j) => (
-                          <li key={j}>{f}</li>
+                        {exp.findings.map((f, j) => f && (
+                          <li key={j}>
+                            {f}
+                          </li>
                         ))}
                       </ul>
                     </div>
@@ -122,13 +163,13 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
                     <div>
                       <h5 className="font-semibold text-gray-700 mb-1">Measurements</h5>
                       <ul className="list-disc list-inside space-y-1">
-                        {exp.measurements.map((m, j) => (
+                        {exp.measurements.map((m, j) => (m?.parameter || m?.value) && (
                           <li key={j}>
                             {[m.parameter, [m.value, m.unit].filter(Boolean).join(' ')]
                               .filter(Boolean)
                               .join(': ')}
                             {m.diagnostic ? ` — ${m.diagnostic}` : ''}
-                          </li>
+                                                      </li>
                         ))}
                       </ul>
                     </div>
@@ -137,11 +178,11 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
                     <div>
                       <h5 className="font-semibold text-gray-700 mb-1">Scalability claims</h5>
                       <ul className="list-disc list-inside space-y-1">
-                        {exp.scalabilityClaims.map((c, j) => (
+                        {exp.scalabilityClaims.map((c, j) => c?.statement && (
                           <li key={j}>
                             {c.statement}
                             {c.limit ? ` (limit: ${c.limit})` : ''}
-                          </li>
+                                                      </li>
                         ))}
                       </ul>
                     </div>
@@ -150,8 +191,10 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
                     <div>
                       <h5 className="font-semibold text-gray-700 mb-1">Constraints</h5>
                       <ul className="list-disc list-inside space-y-1">
-                        {exp.constraints.filter(Boolean).map((c, j) => (
-                          <li key={j}>{c}</li>
+                        {exp.constraints.map((c, j) => c && (
+                          <li key={j}>
+                            {c}
+                          </li>
                         ))}
                       </ul>
                     </div>
@@ -160,11 +203,13 @@ export const PaperDetails: React.FC<PaperDetailsProps> = ({ dossier, onClose }) 
                     <div>
                       <h5 className="font-semibold text-gray-700 mb-1">Instabilities</h5>
                       <div className="flex flex-wrap gap-1">
-                        {exp.instabilities.map((x, j) => (
-                          <Badge key={j} variant={x.observed ? 'default' : 'secondary'} className="text-xs">
-                            {x.name}
-                            {x.observed ? ' (observed)' : ' (predicted)'}
-                          </Badge>
+                        {exp.instabilities.map((x, j) => x?.name && (
+                          <span key={j} className="inline-flex items-center gap-0.5">
+                            <Badge variant={x.observed ? 'default' : 'secondary'} className="text-xs">
+                              {x.name}
+                              {x.observed ? ' (observed)' : ' (predicted)'}
+                            </Badge>
+                          </span>
                         ))}
                       </div>
                     </div>

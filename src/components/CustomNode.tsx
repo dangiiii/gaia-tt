@@ -71,6 +71,15 @@ export const CustomNode: React.FC<CustomNodeProps> = ({
         className="opacity-0"
       />
 
+      {/* Dedicated attachment point for literature overlay edges so they dock
+          on the side facing the literature nodes without affecting tree edges. */}
+      <Handle
+        type="target"
+        id="lit-target"
+        position={Position.Right}
+        className="opacity-0"
+      />
+
       <div className="w-full h-full flex items-center justify-center text-center px-1 text-sm font-medium overflow-hidden">
         <span className="line-clamp-3 break-words" title={data.label}>
           {data.label}

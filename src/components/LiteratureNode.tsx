@@ -4,10 +4,14 @@ import React from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { LiteratureNodeData } from '@/lib/types';
 import { Button } from '@/components/ui/button';
+import VoteButtons from './VoteButtons';
+import { VoteCounts } from '@/lib/votes';
 
 interface LiteratureNodeProps extends Omit<NodeProps, 'data'> {
   data: LiteratureNodeData;
   onShowPaper: (entity: LiteratureNodeData['entity']) => void;
+  votes?: VoteCounts;
+  onVote?: (vote: 'up' | 'down' | null) => void;
 }
 
 const KIND_ICONS: Record<string, string> = {
@@ -19,11 +23,20 @@ const KIND_ICONS: Record<string, string> = {
 export const LiteratureNode: React.FC<LiteratureNodeProps> = ({
   data,
   onShowPaper,
+  votes,
+  onVote,
 }) => {
   const canOpen = data.entity.kind === 'paper';
+  const canVote = data.entity.kind !== 'paper' && onVote;
   return (
     <div className="w-full h-full relative">
       <Handle type="target" position={Position.Left} className="opacity-0" />
+
+      {canVote && (
+        <div className="absolute -top-2 left-1 z-10 bg-white/90 rounded">
+          <VoteButtons counts={votes} onVote={onVote} size="xs" />
+        </div>
+      )}
 
       <div className="w-full h-full flex items-center justify-center text-center px-1 text-xs font-medium overflow-hidden gap-1">
         <svg
@@ -44,7 +57,7 @@ export const LiteratureNode: React.FC<LiteratureNodeProps> = ({
         </span>
       </div>
 
-      <Handle type="source" position={Position.Right} className="opacity-0" />
+      <Handle type="source" position={Position.Left} className="opacity-0" />
 
       {canOpen && (
         <div className="absolute bottom-14 right-0 transform translate-x-2 -translate-y-2 z-10 pointer-events-auto">

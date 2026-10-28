@@ -215,6 +215,8 @@ export interface KgMeasurement {
 }
 
 export interface KgExperiment {
+  /** Stable vote/curation key, attached server-side by /api/kg/paper. */
+  voteKey?: string;
   name?: string | null;
   device?: string | null;
   heatingMethods?: { name?: string | null; frequency?: string | null; power?: string | null; pulseDuration?: string | null }[];
