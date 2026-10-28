@@ -33,7 +33,7 @@ export const LiteratureNode: React.FC<LiteratureNodeProps> = ({
       <Handle type="target" position={Position.Left} className="opacity-0" />
 
       {canVote && (
-        <div className="absolute -top-2 left-1 z-10 bg-white/90 rounded">
+        <div className="absolute top-0 left-0.5 z-10">
           <VoteButtons counts={votes} onVote={onVote} size="xs" />
         </div>
       )}

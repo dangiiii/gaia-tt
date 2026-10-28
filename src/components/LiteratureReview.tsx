@@ -60,6 +60,15 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
   const [busy, setBusy] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'accepted' | 'rejected'>('all');
   const [sourceFilter, setSourceFilter] = useState<'all' | 'manual' | 'ai'>('all');
+  // Concepts start collapsed; clicking a header toggles its items.
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggleOpen = (nodeId: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
 
   useEffect(() => {
     fetch(`/investment-tech-tree/api/kg/review?topic=${topic}`)
@@ -229,13 +238,29 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
           )}
           {visibleNodes.map((node) => {
             const items = node.items;
+            const isOpen = open.has(node.nodeId);
+            const partCount = node.items.reduce((n, it) => n + it.parts.length, 0);
             return (
               <div key={node.nodeId}>
-                <h3 className="text-sm font-semibold text-gray-800 mb-2">
+                <button
+                  onClick={() => toggleOpen(node.nodeId)}
+                  className="w-full flex items-center gap-1.5 text-sm font-semibold text-gray-800 mb-1 hover:text-gray-600 text-left"
+                >
+                  <svg
+                    className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
                   {node.nodeLabel}
-                  <span className="ml-2 font-normal text-gray-400">({node.nodeId})</span>
-                </h3>
-                <ul className="space-y-1">
+                  <span className="font-normal text-gray-400">
+                    ({items.length}{partCount ? ` +${partCount} parts` : ''})
+                  </span>
+                </button>
+                {isOpen && (
+                <ul className="space-y-1 ml-4">
                   {items.map((it) => {
                     const accepted = it.status === 'accepted';
                     return (
@@ -292,6 +317,7 @@ export const LiteratureReview: React.FC<LiteratureReviewProps> = ({
                     );
                   })}
                 </ul>
+                )}
               </div>
             );
           })}
