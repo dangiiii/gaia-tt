@@ -59,7 +59,7 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 
 ### AI Integration
 
-- **Google Gemini API**: Advanced language model for contextual assistance
+- **Google Gemini API**: Advanced language model for contextual assistance (currently in use; migrating to self-hosted `qwen3.8:27b` via Ollama)
 - **DOMPurify**: XSS protection for AI-generated content
 - **Rate Limiting**: Client-side request management
 - **PDF Processing**: Support for uploading and analyzing PDF documents
@@ -200,6 +200,24 @@ src/
 - `npm run build` - Build for production
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint
+
+### Remote Services via SSH Port Forwarding
+
+For local development, the knowledge-graph backend services (Neo4j and Ollama) run on the remote `aconcagua` host on non-standard ports. Forward them to their standard local ports so local tools and services can reach them on `localhost`:
+
+```bash
+ssh -L 7474:localhost:7475 -L 7687:localhost:7688 -L 11434:localhost:11437 <host>
+```
+
+| Local port | Service | Remote port (`aconcagua server`) |
+|------------|---------|---------------------|
+| 7474 | Neo4j Browser (HTTP) | 7475 |
+| 7687 | Neo4j Bolt | 7688 |
+| 11434 | Ollama API | 11437 |
+
+Keep the SSH session open while developing. You can verify the Ollama endpoint with `scripts/check_ollama.sh`.
+
+> **Note on LLMs:** The chat currently uses Google Gemini, but the remote Ollama instance also serves `qwen3.8:27b` — the model all LLM features are intended to migrate to.
 
 ### Code Quality
 
