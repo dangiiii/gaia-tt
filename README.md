@@ -155,7 +155,7 @@ src/
 
    ```bash
    git clone <repository-url>
-   cd investment-tech-tree
+   cd gaia-tt
    ```
 
 2. **Install dependencies**
