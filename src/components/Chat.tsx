@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Loader2, Trash2, Upload } from 'lucide-react';
 import DOMPurify from 'dompurify';
-import { ChatMessage, ChatHistory } from '@/lib/types';
+import { ChatMessage, ChatHistory, KgPaperDossier } from '@/lib/types';
 import { TopicKey } from '@/lib/topicConfig';
+import PaperDetails from './PaperDetails';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,6 +16,18 @@ type ChatMode = 'instant' | 'thinking';
 
 interface ChatProps {
   topic: TopicKey;
+}
+
+// Paper-id citations like [IAEA-CN-28-H-10] emitted by the kg-service,
+// renumbered to [1], [2], … and turned into clickable dossier links.
+const CITE_RE = /\[(IAEA-CN-[\w.-]+|CN-[\w.-]+)\]/g;
+
+function linkCitations(html: string): string {
+  const numbers = new Map<string, number>();
+  return html.replace(CITE_RE, (m, id) => {
+    if (!numbers.has(id)) numbers.set(id, numbers.size + 1);
+    return `<span class="kg-cite" data-paperid="${id}">[${numbers.get(id)}]</span>`;
+  });
 }
 
 const Chat: React.FC<ChatProps> = ({ topic }) => {
@@ -28,6 +41,7 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
   const [lastRequestTime, setLastRequestTime] = useState(0);
   const [rateLimitExceeded, setRateLimitExceeded] = useState(false);
   const [mode, setMode] = useState<ChatMode>('instant');
+  const [citedPaper, setCitedPaper] = useState<KgPaperDossier | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -164,9 +178,12 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
     setLastRequestTime(Date.now());
     setRateLimitExceeded(false);
 
+    // Draft assistant message, filled progressively by the NDJSON stream.
+    const draftId = (Date.now() + 1).toString();
+
     try {
       // Convert file to base64 on the client if present
-      let fileData: { base64: string; mimeType: string } | null = null;
+      let fileData: { base64: string; mimeType: string; fileName: string } | null = null;
       if (file) {
         const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
@@ -174,7 +191,7 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
             resolve((reader.result as string).split(',')[1]);
           reader.readAsDataURL(file);
         });
-        fileData = { base64, mimeType: file.type };
+        fileData = { base64, mimeType: file.type, fileName: file.name };
       }
 
       // Call server-side API route — API key never touches the browser
@@ -191,32 +208,84 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
         }),
       });
 
-      if (!res.ok) {
-        const err = await res.json();
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to get response');
       }
 
-      const data = await res.json();
+      setMessages((prev) => [
+        ...prev,
+        { id: draftId, type: 'assistant', content: '', timestamp: Date.now() },
+      ]);
+      let draftText = '';
+      let tools: string[] = [];
+      const updateDraft = () =>
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === draftId
+              ? { ...m, content: draftText, toolsUsed: [...tools] }
+              : m,
+          ),
+        );
 
-      const assistantMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content: data.response,
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, assistantMessage]);
+      // NDJSON stream: tool calls, progress notes, text deltas, done/error.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let ev: any;
+          try {
+            ev = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (ev.type === 'tool') {
+            tools.push(ev.name);
+            setUploadStatus('Searching the knowledge graph…');
+          } else if (ev.type === 'progress') {
+            setUploadStatus(ev.text);
+          } else if (ev.type === 'delta') {
+            draftText += ev.text;
+            setUploadStatus('Writing answer…');
+          } else if (ev.type === 'done') {
+            tools = ev.toolsUsed ?? tools;
+            if (ev.response) draftText = ev.response;
+          } else if (ev.type === 'error') {
+            throw new Error(ev.error || 'KG service error');
+          }
+          updateDraft();
+        }
+      }
+      if (!draftText) draftText = 'No response received.';
+      updateDraft();
     } catch (error) {
       console.error('Error sending message:', error);
-      const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        type: 'assistant',
-        content:
-          error instanceof Error
-            ? `Error: ${error.message}`
-            : 'Sorry, there was an error processing your request. Please try again.',
-        timestamp: Date.now(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      const errorText =
+        error instanceof Error
+          ? `Error: ${error.message}`
+          : 'Sorry, there was an error processing your request. Please try again.';
+      setMessages((prev) =>
+        prev.some((m) => m.id === draftId)
+          ? prev.map((m) =>
+              m.id === draftId ? { ...m, content: errorText } : m,
+            )
+          : [
+              ...prev,
+              {
+                id: draftId,
+                type: 'assistant',
+                content: errorText,
+                timestamp: Date.now(),
+              },
+            ],
+      );
     } finally {
       setIsLoading(false);
       setUploadStatus('');
@@ -343,20 +412,34 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
                       <div
                         dangerouslySetInnerHTML={{
                           __html: DOMPurify.sanitize(
-                            message.content
-                              .replace(/^```html\s*/i, '')
-                              .replace(/```[\s\n]*$/, ''),
+                            linkCitations(
+                              message.content
+                                .replace(/^```html\s*/i, '')
+                                .replace(/```[\s\n]*$/, ''),
+                            ),
                             {
                               ALLOWED_TAGS: [
                                 'h2', 'h3', 'h4', 'p', 'ul', 'ol', 'li',
                                 'strong', 'em', 'table', 'thead', 'tbody',
                                 'tr', 'td', 'th', 'code', 'pre', 'br', 'a',
+                                'span',
                               ],
-                              ALLOWED_ATTR: ['class', 'href', 'target', 'rel'],
+                              ALLOWED_ATTR: ['class', 'href', 'target', 'rel', 'data-paperid'],
                             },
                           ),
                         }}
-                        className="prose prose-sm max-w-none [&_table]:overflow-x-auto [&_table]:block [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-gray-300 [&_td]:border [&_td]:border-gray-300 [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-nowrap [&_th]:border [&_th]:border-gray-300 [&_th]:px-3 [&_th]:py-2 [&_th]:bg-gray-50 [&_th]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:list-inside [&_ol]:mb-3 [&_ol]:text-gray-700 [&_li]:mb-1 [&_a]:text-blue-600 [&_a]:hover:underline"
+                        onClick={(e) => {
+                          const pid = (e.target as HTMLElement).dataset?.paperid;
+                          if (pid) {
+                            fetch(
+                              `/investment-tech-tree/api/kg/paper/${encodeURIComponent(pid)}?topic=${topic}`,
+                            )
+                              .then((r) => (r.ok ? r.json() : null))
+                              .then((d) => d && setCitedPaper(d))
+                              .catch(() => {});
+                          }
+                        }}
+                        className="prose prose-sm max-w-none [&_table]:overflow-x-auto [&_table]:block [&_table]:w-full [&_table]:border-collapse [&_table]:border [&_table]:border-gray-300 [&_td]:border [&_td]:border-gray-300 [&_td]:px-3 [&_td]:py-2 [&_td]:whitespace-nowrap [&_th]:border [&_th]:border-gray-300 [&_th]:px-3 [&_th]:py-2 [&_th]:bg-gray-50 [&_th]:font-semibold [&_h3]:mt-3 [&_h3]:mb-1 [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:list-inside [&_ol]:mb-3 [&_ol]:text-gray-700 [&_li]:mb-1 [&_a]:text-blue-600 [&_a]:hover:underline [&_.kg-cite]:text-indigo-600 [&_.kg-cite]:font-semibold [&_.kg-cite]:cursor-pointer [&_.kg-cite]:hover:underline"
                       />
                     ) : (
                       <div className="whitespace-pre-wrap">
@@ -364,6 +447,19 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
                       </div>
                     )}
                   </div>
+                  {message.toolsUsed?.length ? (
+                    <details className="mt-2 text-xs text-gray-500">
+                      <summary className="cursor-pointer hover:text-gray-700 select-none">
+                        {message.toolsUsed.length} knowledge graph lookup
+                        {message.toolsUsed.length === 1 ? '' : 's'}
+                      </summary>
+                      <ul className="mt-1 space-y-0.5 font-mono text-[11px] text-gray-400 pl-3">
+                        {message.toolsUsed.map((call, i) => (
+                          <li key={i} className="break-all">{call}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                   <div
                     className={`text-xs mt-2 ${
                       message.type === 'user' ? 'text-slate-100' : 'text-gray-500'
@@ -388,7 +484,7 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
                   <Loader2 size={16} className="animate-spin text-gray-500" />
                   <span className="text-gray-500">
                     {uploadStatus ||
-                      (mode === 'thinking' ? 'Thinking...' : 'Analysing...')}
+                      (mode === 'thinking' ? 'Deep analysis...' : 'Analysing...')}
                   </span>
                 </div>
               </CardContent>
@@ -437,8 +533,8 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
                 className="h-8 text-xs border border-gray-200 rounded px-1 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-400 cursor-pointer"
                 title="Response mode"
               >
-                <option value="instant">Flash</option>
-                <option value="thinking">Thinking</option>
+                <option value="instant">Instant</option>
+                <option value="thinking">Deep Analysis</option>
               </select>
               <label htmlFor="file-upload-chat">
                 <Button
@@ -479,6 +575,13 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
           supported.
         </p>
       </div>
+      {citedPaper && (
+        <PaperDetails
+          dossier={citedPaper}
+          topic={topic}
+          onClose={() => setCitedPaper(null)}
+        />
+      )}
     </div>
   );
 };

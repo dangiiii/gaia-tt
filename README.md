@@ -19,11 +19,16 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 
 ### AI-Powered Chat Interface
 
-- **Contextual Assistance**: AI chat powered by Google Gemini with full knowledge of the tech tree
+- **Contextual Assistance**: Chat is proxied to the kg-service, where `qwen3.8:27b` (Ollama) answers with an agentic loop — it calls KG tools (entity resolution, concept expansion, paper dossiers, vector search over paper chunks, guarded read-only Cypher) and cites papers by id
 - **Technology Queries**: Ask questions about specific technologies, milestones, or investment opportunities
-- **Rate Limiting**: Built-in request limiting to manage API usage
 - **Persistent History**: Chat history saved locally for continuity
-- **PDF Document Upload**: Upload research papers and technical documents for AI analysis and making suggestions for editing the TT
+
+### Literature Overlay & Curation
+
+- **Literature nodes**: Nodes enriched by the KG show a book icon — papers, fusion devices and findings materialized from Neo4j into MongoDB (`enrich.py`), so no live KG connection is needed at runtime
+- **Overview/Focused modes**: Focused mode isolates a node with its literature context; edge labels and kind-colored edges are toggleable
+- **Voting**: Users can thumb up/down devices and findings on the nodes, and papers + individual experiments in the paper details modal — tallies surface in the review UI
+- **Review Literature**: Admin-gated curation panel — filter by accepted/rejected and manual/AI origin, see vote tallies and LLM rejection reasons, and accept/reject items (including individual paper experiments). Human verdicts persist across enrichment rebuilds.
 
 ### Administrative Features
 
@@ -169,9 +174,11 @@ src/
 
    ```env
    NEXT_PUBLIC_ENVIRONMENT=development
-   GEMINI_API_KEY=your_gemini_api_key_here
    MONGODB_URI=your_tech_tree_db_connection_string
    ADMIN_PASSWORD=your_admin_password_here
+   KG_SERVICE_URL=http://localhost:8080   # kg-service (chat), e.g. forwarded 22333
+   KG_API_KEY=your_shared_kg_service_key
+   VOTE_SECRET=any_long_random_string     # signs anonymous voter cookies
    ```
 
 4. **Start development server**
@@ -188,9 +195,12 @@ src/
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `NEXT_PUBLIC_ENVIRONMENT` | Environment mode (development/production) | Yes |
-| `NEXT_PUBLIC_GEMINI_API_KEY` | Google Gemini API key for chat functionality | Yes |
 | `MONGODB_URI` | Connection string for DB | Yes |
-| `ADMIN_PASSWORD` | Admin PWD for TT Edits | Yes |
+| `ADMIN_PASSWORD` | Admin PWD for TT Edits and literature curation | Yes |
+| `KG_SERVICE_URL` | Base URL of the kg-service (chat backend), e.g. `http://localhost:22333` | For chat |
+| `KG_API_KEY` | Shared key sent as `X-API-Key` to the kg-service | For chat |
+| `VOTE_SECRET` | HMAC key signing anonymous voter cookies (any long random string) | For voting |
+| `GEMINI_API_KEY` | Legacy — chat now uses the kg-service; safe to drop | No |
 
 ## Development
 
@@ -206,7 +216,7 @@ src/
 For local development, the knowledge-graph backend services (Neo4j and Ollama) run on the remote `aconcagua` host on non-standard ports. Forward them to their standard local ports so local tools and services can reach them on `localhost`:
 
 ```bash
-ssh -L 7474:localhost:7475 -L 7687:localhost:7688 -L 11434:localhost:11437 <host>
+ssh -L 7474:localhost:7475 -L 7687:localhost:7688 -L 11434:localhost:11437 -L 22333:localhost:22333 <host>
 ```
 
 | Local port | Service | Remote port (`aconcagua server`) |
@@ -214,10 +224,11 @@ ssh -L 7474:localhost:7475 -L 7687:localhost:7688 -L 11434:localhost:11437 <host
 | 7474 | Neo4j Browser (HTTP) | 7475 |
 | 7687 | Neo4j Bolt | 7688 |
 | 11434 | Ollama API | 11437 |
+| 22333 | kg-service API | 22333 |
 
 Keep the SSH session open while developing. You can verify the Ollama endpoint with `scripts/check_ollama.sh`.
 
-> **Note on LLMs:** The chat currently uses Google Gemini, but the remote Ollama instance also serves `qwen3.8:27b` — the model all LLM features are intended to migrate to.
+> **Note on LLMs:** Chat is served by the kg-service (`fusion_kg_builder` repo, `service/kg_service.py` — FastAPI + bounded agentic loop over `qwen3.8:27b` on Ollama, with KG tools incl. read-only Cypher and vector search). For chat-only use, forwarding `22333` suffices and `KG_SERVICE_URL=http://localhost:22333`. The literature overlay does not need any forwarding — it reads materialized `kg_*` collections from MongoDB.
 
 ### Code Quality
 
@@ -279,9 +290,10 @@ The application is optimized for desktop and tablet devices. Mobile phone users 
 1. Push your code to GitHub
 2. Import project in Vercel
 3. Configure environment variables:
-   - `NEXT_PUBLIC_GEMINI_API_KEY`
    - `MONGODB_URI`
    - `ADMIN_PASSWORD`
+   - `VOTE_SECRET`
+   - `KG_SERVICE_URL` / `KG_API_KEY` — point at the tunneled kg-service (see `docker-compose.stack.yml` in the `fusion_kg_builder` repo; the service publishes `22333` on the KG server's loopback)
    - `NEXT_PUBLIC_ENVIRONMENT=production`
 4. Deploy
 

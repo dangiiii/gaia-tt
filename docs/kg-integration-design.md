@@ -460,3 +460,14 @@ Phases 1–2 deliver visible value without touching the uni network at all — t
 - **Multi-KG future**: second KG later (e.g. STFC/KG-Explorer data) → `kg_node_enrichment.kgSource` field + per-graph expansion modules?
 - **Science-mode semantics**: when is evidence "conflicting" vs. "contradicting"? Needs a definition before `/verify` ships verdicts — otherwise red nodes will be noisy.
 - **Science-mode persistence**: Mongo `science_sessions` vs. storing the evidence graph inside Neo4j under the session (keeps graph data in the graph DB, but Mongo is simpler for app reads)?
+
+## 12. Implementation status (Oct 2026)
+
+Phases 1–2 are done (`enrich.py`, `kg_*` collections, `/api/kg*` routes, literature overlay, curation + voting UI). Phase 3–4 are partially done, **ahead of plan on agentic**: chat went straight to a bounded agent loop instead of the deterministic-only pipeline:
+
+- `service/kg_service.py` (FastAPI) implements `/health`, `/chat`, `/resolve`, `/expand`, `/paper/{id}` — X-API-Key auth + per-IP rate limit.
+- `/chat` is a **bounded agentic loop** (max 8 rounds) over qwen3.8:27b with tools: `find_entities`, `expand_concept`, `paper_details`, `search_chunks` (vector index), `run_cypher` (allow-listed read-only grammar: MATCH/OPTIONAL MATCH/UNWIND/WITH/RETURN, no CALL/writes).
+- `src/app/api/chat/route.ts` proxies to `${KG_SERVICE_URL}/chat` with `KG_API_KEY`, non-streaming `{response}` contract (unchanged `Chat.tsx`), `maxDuration = 60` (Vercel hobby cap — long agentic runs may need streaming or the job pattern from §3.3).
+- `Dockerfile.kg-service` in fusion_kg_builder builds the deployable container.
+- Not yet done vs. plan: SSE streaming, session storage, `/search`/`/neighbors`/`/verify` endpoints, UI actions, science mode, `--diff` rebuild hook, tunnel + read-only Neo4j user for deployment.
+- `GEMINI_API_KEY` is now unused by `/api/chat` (kept in env for nothing else — safe to drop).

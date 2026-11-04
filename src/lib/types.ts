@@ -78,6 +78,8 @@ export interface ChatMessage {
   id: string;
   type: 'user' | 'assistant';
   content: string;
+  /** KG tool calls the agent ran to produce this answer (e.g. "search_chunks(...)"). */
+  toolsUsed?: string[];
   timestamp: number;
 }
 
