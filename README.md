@@ -17,6 +17,17 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 - **Relationship Visualization**: Clear depiction of dependencies and connections between technologies
 - **Node Highlighting**: Interactive selection with connected element highlighting
 
+### Multi-View Explorer
+
+- **Technology View**: Preserves the dependency graph, simulations, literature
+  overlay, voting, paper details, and curation workflow
+- **Company View**: Searchable master-detail directory with investment KPIs,
+  company profiles, and a compact selected-company technology graph
+- **World View**: Pannable/zoomable country map with company-count bubbles,
+  verified city pins, and an on-map company/technology drawer
+- **Persistent Exploration**: Filters, selection, map pan/zoom, layer, and
+  country state survive switching between views
+
 ### AI-Powered Chat Interface
 
 - **Contextual Assistance**: Chat is proxied to the kg-service, where `qwen3.8:27b` (Ollama) answers with an agentic loop — it calls KG tools (entity resolution, concept expansion, paper dossiers, vector search over paper chunks, guarded read-only Cypher) and cites papers by id
@@ -60,6 +71,7 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 
 - **React Flow**: Interactive node-based graph visualization
 - **ELK.js**: Automatic graph layout and positioning
+- **React Simple Maps / World Atlas**: Local deterministic map rendering
 - **Custom Node Types**: Specialized node components for different technology types
 
 ### AI Integration
@@ -153,6 +165,8 @@ src/
 - Note your cluster connection details
 - Run following script to set-up the nuclear db: `npx tsx --env-file=.env.local scripts/add-nuclear-data.ts`
 - You can also add fossil fuel db: `npx tsx --env-file=.env.local scripts/add-fossil-fuel-data.ts`
+- Seed nuclear company mappings with
+  `npx tsx --env-file=.env.local scripts/add-tt-companies.ts`
 
 ### Installation
 
@@ -210,6 +224,11 @@ src/
 - `npm run build` - Build for production
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint
+- `npm run typecheck` - Run strict TypeScript checks
+- `npm test` - Run Company/World projection and geography tests
+- `npm run audit:data` - Validate active graph, company mapping, and location data
+- `npm run generate:company-locations` - Regenerate verified city coordinates
+  from headquarters text using the local GeoNames gazetteer
 
 ### Remote Services via SSH Port Forwarding
 

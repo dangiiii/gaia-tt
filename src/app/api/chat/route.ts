@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
+import { TechTree } from '@/lib/types';
+
+interface ChatRequestBody {
+  message?: string;
+  context?: TechTree;
+  history?: unknown[];
+  topic: TopicKey;
+  fileData?: { base64: string; mimeType: string; fileName?: string };
+  mode?: string;
+}
 
 // Agentic chat can take a while (multiple LLM + Cypher rounds on the KG
 // service). On Vercel, hobby plans cap serverless duration regardless.
@@ -21,7 +31,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
+    const body = (await request.json()) as ChatRequestBody;
     const { message, context, history, topic, fileData, mode } = body;
 
     if (!message && !fileData) {
@@ -36,7 +46,7 @@ export async function POST(request: NextRequest) {
     // (the KG remains the evidence source; the service appends this text).
     const nodesContext = (context?.nodes || [])
       .map(
-        (n: any) =>
+        (n) =>
           `- ${n.data.label} [${n.id}] (category: ${n.data.category || 'n/a'}, ` +
           `TRL ${n.data.trl_current || 'n/a'}): ${n.data.detailedDescription || n.data.description || ''}`,
       )

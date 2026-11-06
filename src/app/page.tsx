@@ -1,8 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import TechTree from '@/components/TechTree';
-import { ReactFlowProvider } from '@xyflow/react';
+import { ExplorerWorkspace } from '@/components/ExplorerWorkspace';
 import { TopicKey, DEFAULT_TOPIC } from '@/lib/topicConfig';
 import '@xyflow/react/dist/style.css';
 
@@ -11,12 +10,10 @@ export default function Home() {
 
   return (
     <div className="h-screen">
-      <ReactFlowProvider>
-        <TechTree 
-          topic={currentTopic} 
-          onTopicChange={(value) => setCurrentTopic(value as TopicKey)} 
-        />
-      </ReactFlowProvider>
+      <ExplorerWorkspace
+        topic={currentTopic}
+        onTopicChange={(value) => setCurrentTopic(value as TopicKey)}
+      />
     </div>
   );
 }

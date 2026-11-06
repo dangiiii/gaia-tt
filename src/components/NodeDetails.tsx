@@ -28,6 +28,12 @@ type NodeDetailsProps = {
   onSubViewChange: (v: NodeDetailsSubView) => void;
 };
 
+interface InfactAnalysis {
+  probability?: string | number;
+  uncertainty?: string | number;
+  interpretation?: string;
+}
+
 const formatTextWithBreaks = (text: string): string => {
   const sentences = text.split(/(?<=[.!?])\s+/);
   const formattedParagraphs: string[] = [];
@@ -66,11 +72,13 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
       .then((data) => setCompanies(data.companies ?? []))
       .catch(() => {})
       .finally(() => setCompaniesLoading(false));
-  }, [activeSubView, selectedNode?.id, topic]);
+  }, [activeSubView, selectedNode, topic]);
 
   if (!selectedNode) return <Manual />;
 
-  const infactAnalysis = selectedNode.data?.infact_analysis as any;
+  const infactAnalysis = selectedNode.data?.infact_analysis as
+    | InfactAnalysis
+    | undefined;
   const infactStatus = selectedNode.data?.infact_status as string;
   let infactHtmlContent = selectedNode.data?.infact_analysis_html_content as string;
 
