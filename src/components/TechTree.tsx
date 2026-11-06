@@ -47,13 +47,29 @@ if (typeof window !== 'undefined') {
 interface TechTreeProps {
   topic: TopicKey;
   onTopicChange: (value: TopicKey) => void;
+  requestedTechnologyId?: string;
+  technologyFocusRequestKey?: number;
 }
 
-const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
+function areSetsEqual(left: Set<string>, right: Set<string>): boolean {
+  return (
+    left.size === right.size &&
+    [...left].every((value) => right.has(value))
+  );
+}
+
+const TechTree: React.FC<TechTreeProps> = ({
+  topic,
+  onTopicChange,
+  requestedTechnologyId,
+  technologyFocusRequestKey,
+}) => {
   const { techTree, isLoading: isLoadingData, error } = useTechTree(topic);
   const [isLoading, setIsLoading] = useState(true);
   const [nodes, setNodes] = useState<UiNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
+  const layoutedNodesRef = useRef<UiNode[]>([]);
+  const layoutedEdgesRef = useRef<Edge[]>([]);
   const [selectedNode, setSelectedNode] = useState<UiNode | undefined>(undefined);
   const [highlightedElements, setHighlightedElements] = useState<HighlightedElements>({
     nodeIds: new Set(),
@@ -110,24 +126,6 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     });
     return Array.from(categories).sort();
   }, [techTree]);
-
-  // Show error state
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-100">
-        <div className="text-center p-8 bg-white rounded-lg shadow-lg">
-          <h2 className="text-2xl font-bold text-red-600 mb-4">Error Loading Data</h2>
-          <p className="text-gray-600">{error}</p>
-          <button
-            onClick={() => window.location.reload()}
-            className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   const handleEnterEditMode = async () => {
     const password = prompt('Please enter the admin password:');
@@ -252,6 +250,8 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
         searchTerm,
         filteredTechTree,
       );
+      layoutedNodesRef.current = layoutedNodes;
+      layoutedEdgesRef.current = layoutedEdges;
       setNodes(() => layoutedNodes);
       setEdges(() => layoutedEdges);
       setIsLoading(false);
@@ -449,7 +449,14 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
         console.error('Error fetching companies:', err);
       }
     },
-    [nodes, topic, expandedCompanyNodeIds, MAX_VISIBLE_COMPANIES],
+    [
+      nodes,
+      edges,
+      topic,
+      expandedCompanyNodeIds,
+      MAX_VISIBLE_COMPANIES,
+      findConnectedElements,
+    ],
   );
 
   const handleShowLiterature = useCallback(
@@ -756,6 +763,52 @@ const TechTree: React.FC<TechTreeProps> = ({ topic, onTopicChange }) => {
     setShowOnlyConnected(false);
     setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
   }, []);
+
+  useEffect(() => {
+    if (!requestedTechnologyId || isLoading) return;
+    const node = layoutedNodesRef.current.find(
+      (candidate) => candidate.id === requestedTechnologyId,
+    );
+    if (!node) return;
+
+    setSelectedNode((current) => (current?.id === node.id ? current : node));
+    const connected = findConnectedElements(
+      node.id,
+      layoutedEdgesRef.current,
+    );
+    setHighlightedElements((current) =>
+      areSetsEqual(current.nodeIds, connected.nodeIds) &&
+      areSetsEqual(current.edgeIds, connected.edgeIds)
+        ? current
+        : connected,
+    );
+    setIsPanelExpanded(true);
+    showNodeDetailsTabRef.current?.();
+  }, [
+    requestedTechnologyId,
+    technologyFocusRequestKey,
+    isLoading,
+    findConnectedElements,
+  ]);
+
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center bg-gray-100">
+        <div className="rounded-lg bg-white p-8 text-center shadow-lg">
+          <h2 className="mb-4 text-2xl font-bold text-red-600">
+            Error Loading Data
+          </h2>
+          <p className="text-gray-600">{error}</p>
+          <button
+            onClick={() => window.location.reload()}
+            className="mt-4 rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full bg-gray-100 flex">

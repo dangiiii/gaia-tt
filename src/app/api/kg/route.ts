@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
+import { KgEntity } from '@/lib/types';
 
 // Serves the materialized KG enrichment produced by enrich.py
 // (fusion_kg_builder). No live dependency on the KG server.
@@ -51,11 +52,11 @@ export async function GET(request: NextRequest) {
       .toArray();
     const verdicts = new Map(curations.map((c) => [c.entityId, c.verdict]));
 
-    let entities = (doc.entities ?? []).filter(
-      (e: any) => verdicts.get(e.id) !== 'reject',
+    let entities = ((doc.entities ?? []) as KgEntity[]).filter(
+      (entity) => verdicts.get(entity.id) !== 'reject',
     );
-    const resurrected = (doc.meta?.rejected ?? []).filter(
-      (e: any) => verdicts.get(e.id) === 'accept',
+    const resurrected = ((doc.meta?.rejected ?? []) as KgEntity[]).filter(
+      (entity) => verdicts.get(entity.id) === 'accept',
     );
     entities = [...entities, ...resurrected];
 

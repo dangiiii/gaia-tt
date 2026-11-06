@@ -5,14 +5,25 @@ export interface NodeProperties {
   nodeLabel: NodeLabel;
   description: string;
   detailedDescription?: string; // Detailed description for AI context
+  category?: string;
+  subtype?: string;
+  trl_current?: string;
+  trl_projected_5_10_years?: string;
   references?: string[];
   // Group-related properties
   isGroup?: boolean;
   isExpanded?: boolean;
   childNodeIds?: string[];
-  infact_analysis?: any;
+  infact_analysis?: InfactAnalysis;
   infact_analysis_html_content?: string;
   infact_status?: string;
+}
+
+export interface InfactAnalysis {
+  probability?: string | number;
+  uncertainty?: string | number;
+  interpretation?: string;
+  [key: string]: unknown;
 }
 
 export type UiNode = Node<Record<string, unknown> & NodeProperties>;
@@ -125,6 +136,12 @@ export interface CompanyInfo {
   relation_confidence?: number | null;
   relation_method?: string | null;
   relation_reasoning?: string | null;
+  tech_tree_primary_method?: string | null;
+  tech_tree_primary_confidence?: number | null;
+  tech_tree_primary_reasoning?: string | null;
+  tech_tree_primary_source_url?: string | null;
+  tech_tree_all_nodes?: string[];
+  tech_tree_product_clusters?: string[];
 
   // Financials & Scale
   founded_year?: number | null;
@@ -134,6 +151,20 @@ export interface CompanyInfo {
   headcount_range?: string | null;
   description?: string | null;
   domain?: string | null;
+  current_capacity?: string | null;
+  role_in_supply_chain?: string | null;
+  role_in_supply_chain_confidence?: number | null;
+  role_in_supply_chain_reasoning?: string | null;
+  sole_source_dependency?: boolean | null;
+  foreign_ownership_flag?: boolean | null;
+  foreign_ownership_flag_reasoning?: string | null;
+  linkedin_headquarters?: string | null;
+  linkedin_url?: string | null;
+  linkedin_industry?: string | null;
+  linkedin_specialties?: string | null;
+  source?: string | null;
+  source_url?: string | null;
+  trl_source_url?: string | null;
 
   // Risk Scores
   financial_risk_score?: number | null;
@@ -249,3 +280,125 @@ export interface LiteratureNodeData {
   entity: KgEntity;
   parentNodeId: string;
 }
+
+export const EXPLORER_VIEW_MODES = ['technology', 'company', 'world'] as const;
+
+export type ExplorerViewMode = (typeof EXPLORER_VIEW_MODES)[number];
+
+export const GEOGRAPHY_LAYERS = ['headquarters', 'manufacturing'] as const;
+
+export type GeographyLayer = (typeof GEOGRAPHY_LAYERS)[number];
+
+export const PRODUCT_REGIONS = [
+  'All',
+  'North America',
+  'Europe',
+  'China',
+  'Asia-Pacific',
+  'Latin America',
+  'Middle East',
+  'Africa',
+  'Other/Unknown',
+] as const;
+
+export type ProductRegion = (typeof PRODUCT_REGIONS)[number];
+
+export interface CompanySummary {
+  id: string;
+  canonical_name: string;
+  country_iso: string | null;
+  manufacturing_countries: string[];
+  primary_approach: string | null;
+  tech_tree_primary_node: string | null;
+  trl_level: number | null;
+  trl_band: string | null;
+  funding_total_usd: number | null;
+  vc_funding_stage: string | null;
+  headcount_range: string | null;
+  description: string | null;
+  domain: string | null;
+  geopolitical_risk_score: number | null;
+  geopolitical_risk_label: string | null;
+}
+
+export interface CompanyLocation {
+  company_id: string;
+  label: string;
+  country_iso: string;
+  latitude: number;
+  longitude: number;
+  source_field: 'linkedin_headquarters';
+  source_url: string | null;
+}
+
+export interface CompanyTechnologyMapping {
+  id: string;
+  company_id: string;
+  tech_tree_node_id: string;
+  is_primary: boolean;
+  confidence: number | null;
+  method: string | null;
+  reasoning: string | null;
+}
+
+export interface CompanyViewCoverage {
+  totalCompanies: number;
+  mappedCompanies: number;
+  excludedUnmappedCompanies: number;
+  mappedWithHeadquarters: number;
+  mappedWithoutHeadquarters: number;
+  mappedWithManufacturing: number;
+}
+
+export interface AvailableCompanyViewResponse {
+  available: true;
+  companies: CompanySummary[];
+  mappings: CompanyTechnologyMapping[];
+  coverage: CompanyViewCoverage;
+}
+
+export interface UnavailableCompanyViewResponse {
+  available: false;
+  reason: string;
+  companies: [];
+  mappings: [];
+  coverage: CompanyViewCoverage;
+}
+
+export type CompanyViewResponse =
+  | AvailableCompanyViewResponse
+  | UnavailableCompanyViewResponse;
+
+export interface CompanyGraphCompanyNodeData {
+  label: string;
+  nodeType: 'companyGraphCompany';
+  company: CompanySummary;
+}
+
+export interface CompanyGraphTechnologyNodeData {
+  label: string;
+  nodeType: 'companyGraphTechnology';
+  technologyNode: DataNode;
+}
+
+export type CompanyGraphNode = Node<
+  Record<string, unknown> &
+    (CompanyGraphCompanyNodeData | CompanyGraphTechnologyNodeData)
+>;
+
+export type ExplorerSelection =
+  | {
+      kind: 'technology';
+      node: UiNode;
+    }
+  | {
+      kind: 'company';
+      company: CompanySummary | CompanyInfo;
+    }
+  | {
+      kind: 'country';
+      countryIso: string;
+      countryName: string;
+      layer: GeographyLayer;
+      companies: CompanySummary[];
+    };

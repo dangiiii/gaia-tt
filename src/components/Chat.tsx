@@ -240,19 +240,26 @@ const Chat: React.FC<ChatProps> = ({ topic }) => {
         buffer = lines.pop() ?? '';
         for (const line of lines) {
           if (!line.trim()) continue;
-          let ev: any;
+          let ev: {
+            type?: string;
+            name?: string;
+            text?: string;
+            response?: string;
+            error?: string;
+            toolsUsed?: string[];
+          };
           try {
             ev = JSON.parse(line);
           } catch {
             continue;
           }
           if (ev.type === 'tool') {
-            tools.push(ev.name);
+            if (ev.name) tools.push(ev.name);
             setUploadStatus('Searching the knowledge graph…');
           } else if (ev.type === 'progress') {
-            setUploadStatus(ev.text);
+            if (ev.text) setUploadStatus(ev.text);
           } else if (ev.type === 'delta') {
-            draftText += ev.text;
+            draftText += ev.text ?? '';
             setUploadStatus('Writing answer…');
           } else if (ev.type === 'done') {
             tools = ev.toolsUsed ?? tools;

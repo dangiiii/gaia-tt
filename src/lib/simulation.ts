@@ -22,13 +22,14 @@ interface Node {
 interface Edge {
   id: string;
   source: string;
-  target: string;
+  target?: string;
+  targets?: string[];
 }
 
-interface TechTree {
+export interface SimulationTechTree {
   graph: {
-    nodes: any[];
-    edges: any[];
+    nodes: Node[];
+    edges: Edge[];
   };
 }
 
@@ -76,7 +77,7 @@ class NuclearScheduler {
   private dependencies: Map<string, string[]>;
   private downstream: Map<string, Set<string>>;
 
-  constructor(techTree: TechTree) {
+  constructor(techTree: SimulationTechTree) {
     this.nodes = new Map();
     this.dependencies = new Map();
     this.downstream = new Map();
@@ -91,7 +92,7 @@ class NuclearScheduler {
     // FIXED: Build dependency and downstream graphs - handle 'targets' array
     for (const edge of techTree.graph.edges) {
       const sourceId = edge.source;
-      const targets = (edge as any).targets || [edge.target];
+      const targets = edge.targets ?? [edge.target];
       
       for (const targetId of targets) {
         if (targetId) {
@@ -392,7 +393,7 @@ class NuclearScheduler {
 // EXPORTED FUNCTION
 // ============================================================================
 
-export function runSimulation(techTree: TechTree, years: number): SimulationOutput {
+export function runSimulation(techTree: SimulationTechTree, years: number): SimulationOutput {
   const scheduler = new NuclearScheduler(techTree);
   return scheduler.runSimulation(years);
 }
