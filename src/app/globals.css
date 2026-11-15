@@ -91,6 +91,42 @@
     @apply hover:border-black/5 hover:bg-white/90 hover:shadow-sm;
     @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900/20;
   }
+
+  /* First-run foyer: soft wash so the live tree remains the visual anchor. */
+  .welcome-veil {
+    background:
+      linear-gradient(
+        105deg,
+        rgba(248, 250, 252, 0.94) 0%,
+        rgba(248, 250, 252, 0.88) 38%,
+        rgba(241, 245, 249, 0.55) 62%,
+        rgba(226, 232, 240, 0.28) 100%
+      );
+    backdrop-filter: blur(10px) saturate(1.05);
+    @apply data-[state=open]:animate-in data-[state=open]:fade-in-0;
+  }
+
+  .welcome-ambient {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 55% 45% at 12% 18%, rgba(14, 165, 233, 0.08), transparent 70%),
+      radial-gradient(ellipse 40% 35% at 78% 72%, rgba(16, 185, 129, 0.07), transparent 65%),
+      radial-gradient(ellipse 30% 25% at 55% 12%, rgba(148, 163, 184, 0.12), transparent 60%);
+    animation: welcome-drift 18s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes welcome-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.85;
+  }
+  to {
+    transform: translate3d(-1.5%, 1%, 0) scale(1.04);
+    opacity: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

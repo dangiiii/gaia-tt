@@ -1,11 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowRight } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 import { summarizeTree } from '@/lib/technologyCatalog';
 import { peekTechTree, prefetchTechTree, useTechTree } from '@/hooks/useTechTree';
-import { Button } from '@/components/ui/button';
 import { DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { SECTOR_COPY, SECTOR_ORDER } from './sectors';
 
@@ -17,38 +16,44 @@ interface SectorStepProps {
 
 export function SectorStep({ currentTopic, onSelectSector, onSkip }: SectorStepProps) {
   return (
-    <div className="animate-fade-rise flex flex-col px-5 py-5 sm:px-7 sm:py-7">
-      <header className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-500">
-          Investment Tech Tree
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 text-neutral-500 hover:text-neutral-900"
+    <div className="animate-fade-rise flex h-full flex-col">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-[0.7rem] font-medium uppercase tracking-[0.22em] text-neutral-500">
+            GAIA Lab
+          </p>
+          <p className="mt-1 text-[1.65rem] font-semibold tracking-[-0.04em] text-neutral-900 sm:text-[1.85rem]">
+            Investment Tech Tree
+          </p>
+        </div>
+        <button
+          type="button"
           onClick={onSkip}
+          className="shrink-0 pt-1 text-[13px] text-neutral-500 transition hover:text-neutral-900"
         >
-          Skip
-        </Button>
+          Explore map
+        </button>
       </header>
 
-      <div className="mt-8 space-y-2 sm:mt-10">
-        <DialogTitle className="text-[1.75rem] font-semibold leading-tight tracking-tight text-neutral-900 sm:text-[2rem]">
-          Where do you want to start?
+      <div className="mt-auto space-y-3 pb-2 pt-16 sm:pt-20">
+        <DialogTitle className="max-w-[16ch] text-[2.35rem] font-semibold leading-[1.05] tracking-[-0.045em] text-neutral-900 sm:text-[2.75rem]">
+          Follow one technology home.
         </DialogTitle>
-        <DialogDescription className="max-w-md text-[15px] leading-relaxed text-neutral-500">
-          Choose a sector. Next you&apos;ll pick one technology to follow step by
-          step.
+        <DialogDescription className="max-w-[28ch] text-[15px] leading-relaxed text-neutral-500 sm:text-base">
+          Pick a sector. Then choose a design we can walk from prerequisites to
+          deployment.
         </DialogDescription>
       </div>
 
-      <div className="mt-7 space-y-2.5" role="list">
+      <nav className="mt-10 space-y-1 border-t border-neutral-900/10 pt-2" aria-label="Sectors">
         {SECTOR_ORDER.map((topic, index) => (
           <div
             key={topic}
             className="animate-fade-rise"
-            style={{ animationDelay: `${80 + index * 60}ms`, animationFillMode: 'both' }}
-            role="listitem"
+            style={{
+              animationDelay: `${100 + index * 70}ms`,
+              animationFillMode: 'both',
+            }}
           >
             <SectorChoice
               topic={topic}
@@ -57,7 +62,7 @@ export function SectorStep({ currentTopic, onSelectSector, onSkip }: SectorStepP
             />
           </div>
         ))}
-      </div>
+      </nav>
     </div>
   );
 }
@@ -69,7 +74,7 @@ interface SectorChoiceProps {
 }
 
 function SectorChoice({ topic, isCurrent, onSelect }: SectorChoiceProps) {
-  const { icon: Icon, tagline } = SECTOR_COPY[topic];
+  const { tagline } = SECTOR_COPY[topic];
   const [showCounts, setShowCounts] = useState(
     () => isCurrent || peekTechTree(topic) !== null,
   );
@@ -84,24 +89,21 @@ function SectorChoice({ topic, isCurrent, onSelect }: SectorChoiceProps) {
       onMouseEnter={reveal}
       onFocus={reveal}
       onClick={() => onSelect(topic)}
-      className="choice-row group"
+      className="group flex w-full items-baseline gap-4 border-b border-neutral-900/10 py-4 text-left transition duration-300 hover:border-neutral-900/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-900/20"
     >
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-neutral-900 text-white transition duration-300 group-hover:scale-[1.03]">
-        <Icon className="h-5 w-5" aria-hidden />
-      </span>
-      <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block text-[15px] font-semibold text-neutral-900">
+      <span className="min-w-0 flex-1">
+        <span className="block text-[1.35rem] font-semibold tracking-[-0.03em] text-neutral-900 transition group-hover:translate-x-0.5 sm:text-[1.5rem]">
           {TOPICS[topic].label}
         </span>
-        <span className="block text-[13px] leading-snug text-neutral-500">
+        <span className="mt-1 block max-w-[36ch] text-[13px] leading-snug text-neutral-500">
           {tagline}
         </span>
-        <span className="block min-h-4 text-[11px] text-neutral-400">
+        <span className="mt-1.5 block min-h-4 text-[11px] tracking-wide text-neutral-400">
           {showCounts && <SectorCounts topic={topic} />}
         </span>
       </span>
-      <ArrowRight
-        className="h-4 w-4 shrink-0 text-neutral-300 transition duration-300 group-hover:translate-x-0.5 group-hover:text-neutral-700"
+      <ArrowUpRight
+        className="mt-1 h-5 w-5 shrink-0 text-neutral-300 transition duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-neutral-800"
         aria-hidden
       />
     </button>

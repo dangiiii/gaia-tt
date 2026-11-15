@@ -19,8 +19,8 @@ interface WelcomeFlowProps {
 }
 
 /**
- * First-run chooser: a floating glass sheet over the live map so the user
- * picks a small set of options, then follows a guided pathway.
+ * First-run foyer: one full-viewport composition over the live tree.
+ * Sector → technology stays in the same frame so the path feels continuous.
  */
 export function WelcomeFlow({
   initialStep,
@@ -40,30 +40,36 @@ export function WelcomeFlow({
       }}
     >
       <DialogPortal>
-        <DialogOverlay className="z-[80] bg-slate-900/20 backdrop-blur-[3px]" />
-        <DialogPrimitive.Content className="fixed inset-0 z-[90] flex items-end justify-center overflow-y-auto p-3 sm:items-center sm:p-6 focus:outline-none">
-          <div className="glass-sheet animate-sheet-in my-auto w-full max-w-xl overflow-hidden sm:max-w-2xl">
-            {step === 'sector' ? (
-              <SectorStep
-                currentTopic={sector}
-                onSkip={onSkip}
-                onSelectSector={(topic) => {
-                  setSector(topic);
-                  setStep('technology');
-                }}
-              />
-            ) : (
-              <TechnologyStep
-                key={sector}
-                topic={sector}
-                lastTechnologyId={lastTechnologyId}
-                onBack={() => setStep('sector')}
-                onSkip={onSkip}
-                onSelectTechnology={(technologyId) =>
-                  onChooseTechnology(sector, technologyId)
-                }
-              />
-            )}
+        <DialogOverlay className="welcome-veil z-[80] bg-transparent" />
+        <DialogPrimitive.Content className="fixed inset-0 z-[90] overflow-hidden focus:outline-none">
+          <div className="welcome-ambient" aria-hidden />
+          <div className="relative flex h-full w-full">
+            {/* Quiet atmospheric side — the map shows through the veil. */}
+            <div className="pointer-events-none absolute inset-0 md:left-[min(42rem,52%)]" />
+
+            <div className="relative flex h-full w-full max-w-xl flex-col justify-between px-6 py-7 sm:px-10 sm:py-10 md:max-w-[34rem] lg:px-14">
+              {step === 'sector' ? (
+                <SectorStep
+                  currentTopic={sector}
+                  onSkip={onSkip}
+                  onSelectSector={(topic) => {
+                    setSector(topic);
+                    setStep('technology');
+                  }}
+                />
+              ) : (
+                <TechnologyStep
+                  key={sector}
+                  topic={sector}
+                  lastTechnologyId={lastTechnologyId}
+                  onBack={() => setStep('sector')}
+                  onSkip={onSkip}
+                  onSelectTechnology={(technologyId) =>
+                    onChooseTechnology(sector, technologyId)
+                  }
+                />
+              )}
+            </div>
           </div>
         </DialogPrimitive.Content>
       </DialogPortal>
