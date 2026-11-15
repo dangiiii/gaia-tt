@@ -318,8 +318,8 @@ export function WorldExplorer({
   return (
     <div className="relative h-full w-full overflow-hidden bg-slate-50">
       <div
-        className={`absolute top-4 z-20 flex max-h-[calc(100%-2rem)] w-72 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/95 shadow-sm transition-all ${
-          selectedAggregate ? 'right-[25rem]' : 'right-4'
+        className={`glass-panel absolute top-4 z-20 flex max-h-[calc(100%-2rem)] w-80 flex-col overflow-hidden transition-all ${
+          selectedAggregate || selectedReactor ? 'right-[25rem]' : 'right-4'
         }`}
       >
         <div className="overflow-y-auto p-4">
@@ -411,7 +411,7 @@ export function WorldExplorer({
         </div>
       </div>
 
-      <div className="absolute left-4 top-32 z-20 flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white/95 shadow-sm">
+      <div className="glass-panel absolute left-4 top-32 z-20 flex flex-col overflow-hidden">
         <Button
           type="button"
           variant="ghost"
@@ -629,7 +629,7 @@ export function WorldExplorer({
         </ZoomableGroup>
       </ComposableMap>
 
-      <div className="absolute bottom-5 left-5 z-20 rounded-lg border border-gray-200 bg-white/95 p-3 shadow-sm">
+      <div className="glass-panel absolute bottom-5 left-5 z-20 p-3">
         <p className="mb-2 text-xs font-medium text-gray-700">Companies</p>
         <div className="flex items-center gap-1">
           {MAP_COLORS.map((color) => (

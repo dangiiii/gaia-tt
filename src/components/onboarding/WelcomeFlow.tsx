@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { TopicKey } from '@/lib/topicConfig';
-import { Dialog, DialogPortal } from '@/components/ui/dialog';
+import { Dialog, DialogOverlay, DialogPortal } from '@/components/ui/dialog';
 import { SectorStep } from './SectorStep';
 import { TechnologyStep } from './TechnologyStep';
 
@@ -19,8 +19,8 @@ interface WelcomeFlowProps {
 }
 
 /**
- * Full-screen first-run flow: pick a sector, then a deployment concept to
- * follow. Mount it to open; unmount it to close.
+ * First-run chooser: a floating glass sheet over the live map so the user
+ * picks a small set of options, then follows a guided pathway.
  */
 export function WelcomeFlow({
   initialStep,
@@ -40,28 +40,31 @@ export function WelcomeFlow({
       }}
     >
       <DialogPortal>
-        <DialogPrimitive.Content className="fixed inset-0 z-[80] overflow-y-auto bg-gradient-to-b from-slate-200/90 via-slate-100/80 to-white/70 backdrop-blur-sm duration-300 focus:outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0">
-          {step === 'sector' ? (
-            <SectorStep
-              currentTopic={sector}
-              onSkip={onSkip}
-              onSelectSector={(topic) => {
-                setSector(topic);
-                setStep('technology');
-              }}
-            />
-          ) : (
-            <TechnologyStep
-              key={sector}
-              topic={sector}
-              lastTechnologyId={lastTechnologyId}
-              onBack={() => setStep('sector')}
-              onSkip={onSkip}
-              onSelectTechnology={(technologyId) =>
-                onChooseTechnology(sector, technologyId)
-              }
-            />
-          )}
+        <DialogOverlay className="z-[80] bg-slate-900/20 backdrop-blur-[3px]" />
+        <DialogPrimitive.Content className="fixed inset-0 z-[90] flex items-end justify-center overflow-y-auto p-3 sm:items-center sm:p-6 focus:outline-none">
+          <div className="glass-sheet animate-sheet-in my-auto w-full max-w-xl overflow-hidden sm:max-w-2xl">
+            {step === 'sector' ? (
+              <SectorStep
+                currentTopic={sector}
+                onSkip={onSkip}
+                onSelectSector={(topic) => {
+                  setSector(topic);
+                  setStep('technology');
+                }}
+              />
+            ) : (
+              <TechnologyStep
+                key={sector}
+                topic={sector}
+                lastTechnologyId={lastTechnologyId}
+                onBack={() => setStep('sector')}
+                onSkip={onSkip}
+                onSelectTechnology={(technologyId) =>
+                  onChooseTechnology(sector, technologyId)
+                }
+              />
+            )}
+          </div>
         </DialogPrimitive.Content>
       </DialogPortal>
     </Dialog>

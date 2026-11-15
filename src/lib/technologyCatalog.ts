@@ -38,6 +38,50 @@ export interface TreeSummary {
   technologies: number;
 }
 
+const SUGGESTED_LIMIT = 6;
+
+/**
+ * A short, diverse shortlist for first-run picking: last-viewed first, then
+ * one per category, then fill by moderate prerequisite depth.
+ */
+export function suggestTechnologies(
+  catalog: TechnologyCatalogEntry[],
+  lastTechnologyId: string | null = null,
+  limit: number = SUGGESTED_LIMIT,
+): TechnologyCatalogEntry[] {
+  if (catalog.length <= limit) return [...catalog];
+
+  const picked: TechnologyCatalogEntry[] = [];
+  const seen = new Set<string>();
+  const take = (entry: TechnologyCatalogEntry | undefined) => {
+    if (!entry || seen.has(entry.id) || picked.length >= limit) return;
+    seen.add(entry.id);
+    picked.push(entry);
+  };
+
+  if (lastTechnologyId) {
+    take(catalog.find((entry) => entry.id === lastTechnologyId));
+  }
+
+  const byCategory = new Map<string, TechnologyCatalogEntry>();
+  for (const entry of catalog) {
+    const key = entry.category ?? 'Other';
+    if (!byCategory.has(key)) byCategory.set(key, entry);
+  }
+  for (const entry of byCategory.values()) take(entry);
+
+  const ranked = [...catalog].sort((left, right) => {
+    const leftScore =
+      left.prerequisiteCount > 0 ? Math.abs(left.prerequisiteCount - 8) : 99;
+    const rightScore =
+      right.prerequisiteCount > 0 ? Math.abs(right.prerequisiteCount - 8) : 99;
+    return leftScore - rightScore || left.label.localeCompare(right.label);
+  });
+  for (const entry of ranked) take(entry);
+
+  return picked;
+}
+
 const BLURB_MAX_LENGTH = 180;
 
 /** First sentence of a description, cut at a word boundary if too long. */

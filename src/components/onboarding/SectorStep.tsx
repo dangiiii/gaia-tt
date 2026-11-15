@@ -17,58 +17,59 @@ interface SectorStepProps {
 
 export function SectorStep({ currentTopic, onSelectSector, onSkip }: SectorStepProps) {
   return (
-    <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col px-6 py-8 md:py-12">
-      <header className="flex items-center justify-between gap-4">
-        <span className="text-sm font-semibold tracking-wide text-gray-500">
-          GAIA Lab · Investment Tech Tree
-        </span>
-        <Button variant="ghost" size="sm" onClick={onSkip}>
-          Skip to the full map
+    <div className="animate-fade-rise flex flex-col px-5 py-5 sm:px-7 sm:py-7">
+      <header className="flex items-center justify-between gap-3">
+        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-500">
+          Investment Tech Tree
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 text-neutral-500 hover:text-neutral-900"
+          onClick={onSkip}
+        >
+          Skip
         </Button>
       </header>
 
-      <div className="mt-10 max-w-2xl space-y-4 md:mt-16">
-        <DialogTitle className="text-3xl font-bold leading-tight tracking-tight text-gray-900 md:text-4xl">
-          Follow a technology from research to deployment
+      <div className="mt-8 space-y-2 sm:mt-10">
+        <DialogTitle className="text-[1.75rem] font-semibold leading-tight tracking-tight text-neutral-900 sm:text-[2rem]">
+          Where do you want to start?
         </DialogTitle>
-        <DialogDescription className="text-base text-gray-600 md:text-lg">
-          Pick a sector, then a deployment concept. We walk you through the
-          milestones and enabling technologies it depends on, one step at a
-          time, and point out where readiness is lowest.
+        <DialogDescription className="max-w-md text-[15px] leading-relaxed text-neutral-500">
+          Choose a sector. Next you&apos;ll pick one technology to follow step by
+          step.
         </DialogDescription>
       </div>
 
-      <h2 className="mt-10 text-xs font-semibold uppercase tracking-wider text-gray-500">
-        Step 1 of 2 · Choose a sector
-      </h2>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        {SECTOR_ORDER.map((topic) => (
-          <SectorCard
+      <div className="mt-7 space-y-2.5" role="list">
+        {SECTOR_ORDER.map((topic, index) => (
+          <div
             key={topic}
-            topic={topic}
-            isCurrent={topic === currentTopic}
-            onSelect={onSelectSector}
-          />
+            className="animate-fade-rise"
+            style={{ animationDelay: `${80 + index * 60}ms`, animationFillMode: 'both' }}
+            role="listitem"
+          >
+            <SectorChoice
+              topic={topic}
+              isCurrent={topic === currentTopic}
+              onSelect={onSelectSector}
+            />
+          </div>
         ))}
       </div>
-
-      <p className="mt-10 text-sm text-gray-500">
-        Built for investors, researchers and policymakers comparing technology
-        pathways. Readiness uses the 1–9 Technology Readiness Level (TRL) scale.
-      </p>
     </div>
   );
 }
 
-interface SectorCardProps {
+interface SectorChoiceProps {
   topic: TopicKey;
   isCurrent: boolean;
   onSelect: (topic: TopicKey) => void;
 }
 
-function SectorCard({ topic, isCurrent, onSelect }: SectorCardProps) {
+function SectorChoice({ topic, isCurrent, onSelect }: SectorChoiceProps) {
   const { icon: Icon, tagline } = SECTOR_COPY[topic];
-  // Counts need the topic's tree, so other sectors load it on hover or focus.
   const [showCounts, setShowCounts] = useState(
     () => isCurrent || peekTechTree(topic) !== null,
   );
@@ -83,26 +84,26 @@ function SectorCard({ topic, isCurrent, onSelect }: SectorCardProps) {
       onMouseEnter={reveal}
       onFocus={reveal}
       onClick={() => onSelect(topic)}
-      className="group flex flex-col gap-4 rounded-xl border border-white/60 bg-white/55 p-5 text-left shadow-sm backdrop-blur-md transition hover:-translate-y-0.5 hover:border-blue-300/80 hover:bg-white/75 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+      className="choice-row group"
     >
-      <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-gray-900 text-white">
-        <Icon className="h-6 w-6" aria-hidden />
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-neutral-900 text-white transition duration-300 group-hover:scale-[1.03]">
+        <Icon className="h-5 w-5" aria-hidden />
       </span>
-      <span className="space-y-1">
-        <span className="block text-lg font-semibold text-gray-900">
+      <span className="min-w-0 flex-1 space-y-0.5">
+        <span className="block text-[15px] font-semibold text-neutral-900">
           {TOPICS[topic].label}
         </span>
-        <span className="block text-sm text-gray-600">{tagline}</span>
-      </span>
-      <span className="mt-auto flex items-end justify-between gap-2">
-        <span className="min-h-4 text-xs text-gray-500">
+        <span className="block text-[13px] leading-snug text-neutral-500">
+          {tagline}
+        </span>
+        <span className="block min-h-4 text-[11px] text-neutral-400">
           {showCounts && <SectorCounts topic={topic} />}
         </span>
-        <ArrowRight
-          className="h-5 w-5 shrink-0 text-blue-600 transition group-hover:translate-x-0.5"
-          aria-hidden
-        />
       </span>
+      <ArrowRight
+        className="h-4 w-4 shrink-0 text-neutral-300 transition duration-300 group-hover:translate-x-0.5 group-hover:text-neutral-700"
+        aria-hidden
+      />
     </button>
   );
 }
@@ -110,8 +111,7 @@ function SectorCard({ topic, isCurrent, onSelect }: SectorCardProps) {
 function SectorCounts({ topic }: { topic: TopicKey }) {
   const { techTree, error } = useTechTree(topic);
   if (error) return <>Counts unavailable</>;
-  if (!techTree) return <span className="animate-pulse">Loading counts…</span>;
-
+  if (!techTree) return <span className="animate-pulse">Loading…</span>;
   if (techTree.nodes.length === 0) return <>No data loaded yet</>;
 
   const summary = summarizeTree(techTree);

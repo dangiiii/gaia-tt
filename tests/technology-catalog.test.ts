@@ -3,6 +3,7 @@ import test from 'node:test';
 import { cleanConceptLabel } from '@/lib/pathway';
 import {
   buildTechnologyCatalog,
+  suggestTechnologies,
   summarizeBlurb,
   summarizeTree,
 } from '@/lib/technologyCatalog';
@@ -103,4 +104,12 @@ test('tree summary counts nodes by role', () => {
     milestones: 21,
     technologies: 12,
   });
+});
+
+test('suggestTechnologies keeps a short diverse shortlist', () => {
+  const catalog = buildTechnologyCatalog(nuclear);
+  const suggested = suggestTechnologies(catalog, 'concept_hts_tokamak', 6);
+  assert.equal(suggested.length, 6);
+  assert.equal(suggested[0].id, 'concept_hts_tokamak');
+  assert.equal(new Set(suggested.map((entry) => entry.id)).size, 6);
 });

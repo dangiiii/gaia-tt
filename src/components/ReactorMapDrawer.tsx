@@ -49,22 +49,25 @@ function EntityRow({
 }) {
   const content = (
     <>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-gray-900">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[14px] font-medium text-neutral-900">
           {entity.name}
         </p>
-        <p className="truncate text-xs text-gray-500">
+        <p className="truncate text-[12px] text-neutral-500">
           {entity.orgId ?? (entity.company ? `id:${entity.company.id}` : entity.id)}
           {entity.roles.length > 0 ? ` · ${entity.roles.join(', ')}` : ''}
         </p>
         {entity.viaTechnologyLabel && (
-          <p className="mt-0.5 truncate text-[11px] text-gray-400">
+          <p className="mt-0.5 truncate text-[11px] text-neutral-400">
             via {entity.viaTechnologyLabel}
           </p>
         )}
       </div>
       {entity.company && (
-        <Badge variant="secondary" className="shrink-0">
+        <Badge
+          variant="secondary"
+          className="shrink-0 rounded-full bg-neutral-100 text-neutral-600"
+        >
           Open
         </Badge>
       )}
@@ -73,7 +76,7 @@ function EntityRow({
 
   if (!entity.company) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-200 p-3 text-left">
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-neutral-200 px-3.5 py-3 text-left">
         {content}
       </div>
     );
@@ -82,7 +85,7 @@ function EntityRow({
   return (
     <button
       type="button"
-      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 text-left transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className="choice-row"
       onClick={() => onShowCompany(entity.company!)}
     >
       {content}
@@ -125,24 +128,26 @@ export function ReactorMapDrawer({
   const countries = facts?.countries ?? [];
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-xl border border-gray-200 bg-white/95 shadow-xl backdrop-blur-sm">
-      <header className="border-b border-gray-200 p-4">
+    <div className="glass-sheet flex h-full flex-col overflow-hidden">
+      <header className="border-b border-neutral-200/70 px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-blue-700">
+            <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-500">
               <Network className="h-3.5 w-3.5" />
               Reactor design
             </div>
-            <h2 className="mt-1 truncate text-xl font-bold text-gray-900">
+            <h2 className="mt-1.5 truncate text-xl font-semibold tracking-tight text-neutral-900">
               {label}
             </h2>
-            <p className="mt-1 font-mono text-[11px] text-gray-400">{nodeId}</p>
+            <p className="mt-1 font-mono text-[11px] text-neutral-400">
+              {nodeId}
+            </p>
           </div>
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="h-8 w-8 shrink-0 p-0"
+            className="h-8 w-8 shrink-0 rounded-full p-0"
             onClick={onClose}
             aria-label="Close reactor drawer"
           >
@@ -152,16 +157,27 @@ export function ReactorMapDrawer({
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {facts?.status && (
-            <Badge variant="secondary">{facts.status}</Badge>
+            <Badge
+              variant="secondary"
+              className="rounded-full bg-neutral-100 text-neutral-700"
+            >
+              {facts.status}
+            </Badge>
           )}
           {facts?.coolant && (
-            <Badge variant="outline">Coolant: {facts.coolant}</Badge>
+            <Badge variant="outline" className="rounded-full">
+              {facts.coolant}
+            </Badge>
           )}
           {facts?.neutron_spectrum && (
-            <Badge variant="outline">{facts.neutron_spectrum}</Badge>
+            <Badge variant="outline" className="rounded-full">
+              {facts.neutron_spectrum}
+            </Badge>
           )}
           {facts?.electric_mwe != null && (
-            <Badge variant="outline">{facts.electric_mwe} MWe</Badge>
+            <Badge variant="outline" className="rounded-full">
+              {facts.electric_mwe} MWe
+            </Badge>
           )}
         </div>
 
@@ -171,7 +187,7 @@ export function ReactorMapDrawer({
               type="button"
               size="sm"
               variant="outline"
-              className="gap-1.5"
+              className="h-8 gap-1.5 rounded-full"
               onClick={onBackToCountry}
             >
               <ArrowLeft className="h-3.5 w-3.5" />
@@ -182,7 +198,7 @@ export function ReactorMapDrawer({
             type="button"
             size="sm"
             variant="outline"
-            className="gap-1.5"
+            className="h-8 gap-1.5 rounded-full"
             onClick={() => onOpenInTechTree(nodeId)}
           >
             <ExternalLink className="h-3.5 w-3.5" />
@@ -191,14 +207,16 @@ export function ReactorMapDrawer({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {countries.length > 0 && (
           <section className="mb-5">
             <div className="mb-2 flex items-center gap-2">
-              <Globe2 className="h-4 w-4 text-gray-600" />
-              <h3 className="text-sm font-semibold text-gray-900">Countries</h3>
+              <Globe2 className="h-4 w-4 text-neutral-500" />
+              <h3 className="text-[13px] font-semibold text-neutral-900">
+                Countries
+              </h3>
             </div>
-            <p className="text-sm text-gray-600">
+            <p className="text-[13px] text-neutral-600">
               {countries
                 .map((iso) => getCountryName(iso) || iso)
                 .join(' · ')}
@@ -208,16 +226,19 @@ export function ReactorMapDrawer({
 
         <section className="mb-5">
           <div className="mb-2 flex items-center gap-2">
-            <Building2 className="h-4 w-4 text-gray-600" />
-            <h3 className="text-sm font-semibold text-gray-900">
+            <Building2 className="h-4 w-4 text-neutral-500" />
+            <h3 className="text-[13px] font-semibold text-neutral-900">
               Linked organisations
             </h3>
-            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+            <Badge
+              variant="secondary"
+              className="h-5 rounded-full bg-neutral-100 px-1.5 text-[10px] text-neutral-600"
+            >
               {linkedCount}
             </Badge>
           </div>
           {groups.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-gray-200 p-3 text-sm text-gray-500">
+            <p className="rounded-2xl border border-dashed border-neutral-200 p-3 text-[13px] text-neutral-500">
               No mapped developers or suppliers for this design yet.
             </p>
           ) : (
@@ -225,11 +246,11 @@ export function ReactorMapDrawer({
               {groups.map((group) => (
                 <div key={group.role}>
                   <div className="mb-2 flex items-center gap-2">
-                    <Factory className="h-3.5 w-3.5 text-gray-500" />
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    <Factory className="h-3.5 w-3.5 text-neutral-400" />
+                    <h4 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">
                       {group.label}
                     </h4>
-                    <span className="text-[10px] text-gray-400">
+                    <span className="text-[10px] text-neutral-400">
                       {group.entities.length}
                     </span>
                   </div>
@@ -246,15 +267,15 @@ export function ReactorMapDrawer({
               ))}
             </div>
           )}
-          <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
-            Grouped from company ↔ design edges (`develops` / `supplies`) and
-            one-hop enabling technologies. Site and programme nodes are shown
-            when present in the catalogue payload below.
+          <p className="mt-3 text-[11px] leading-relaxed text-neutral-400">
+            Grouped from company ↔ design edges and one-hop enabling
+            technologies. Catalogue fields below cover programme and site notes
+            when present.
           </p>
         </section>
 
-        <section className="border-t border-gray-200 pt-4">
-          <h3 className="mb-3 text-sm font-semibold text-gray-900">
+        <section className="border-t border-neutral-200/70 pt-4">
+          <h3 className="mb-3 text-[13px] font-semibold text-neutral-900">
             Catalogue details
           </h3>
           <SmrNodeDetails nodeId={nodeId} topic={topic} />
