@@ -13,6 +13,7 @@ import {
   CompanyLocationGroup,
   CountryCompanyAggregate,
 } from '@/lib/geography';
+import { isReactorNode } from '@/lib/reactorEntities';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
@@ -25,6 +26,8 @@ interface CountryMapDrawerProps {
   onClose: () => void;
   onShowCompany: (company: CompanySummary) => void;
   onShowTechnology: (technologyId: string) => void;
+  /** Prefer for reactor designs so the world view keeps map context. */
+  onShowReactor?: (technologyId: string, label: string) => void;
 }
 
 export function CountryMapDrawer({
@@ -36,6 +39,7 @@ export function CountryMapDrawer({
   onClose,
   onShowCompany,
   onShowTechnology,
+  onShowReactor,
 }: CountryMapDrawerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const filteredCompanies = useMemo(() => {
@@ -189,21 +193,40 @@ export function CountryMapDrawer({
             </h3>
           </div>
           <div className="space-y-2">
-            {technologies.map((technology) => (
-              <button
-                key={technology.technologyId}
-                type="button"
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 text-left transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                onClick={() => onShowTechnology(technology.technologyId)}
-              >
-                <span className="text-sm font-medium text-gray-900">
-                  {technology.label}
-                </span>
-                <Badge variant="secondary" className="shrink-0">
-                  {technology.companyCount}
-                </Badge>
-              </button>
-            ))}
+            {technologies.map((technology) => {
+              const node = techTree?.nodes.find(
+                (entry) => entry.id === technology.technologyId,
+              );
+              const reactor = isReactorNode(node);
+              return (
+                <button
+                  key={technology.technologyId}
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-200 p-3 text-left transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onClick={() => {
+                    if (reactor && onShowReactor) {
+                      onShowReactor(technology.technologyId, technology.label);
+                      return;
+                    }
+                    onShowTechnology(technology.technologyId);
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900">
+                      {technology.label}
+                    </p>
+                    {reactor && (
+                      <p className="text-[11px] text-blue-700">
+                        Reactor design · view linked orgs
+                      </p>
+                    )}
+                  </div>
+                  <Badge variant="secondary" className="shrink-0">
+                    {technology.companyCount}
+                  </Badge>
+                </button>
+              );
+            })}
           </div>
         </section>
       </div>

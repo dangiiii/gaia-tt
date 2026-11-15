@@ -485,6 +485,8 @@ export interface CompanyTechnologyMapping {
   confidence: number | null;
   method: string | null;
   reasoning: string | null;
+  /** Supply-chain roles from SUPPLIES edges (SMR topic); empty for developers. */
+  roles?: string[];
 }
 
 export interface CompanyViewCoverage {
@@ -549,4 +551,15 @@ export type ExplorerSelection =
       countryName: string;
       layer: GeographyLayer;
       companies: CompanySummary[];
+    }
+  | {
+      /** Reactor design opened from world view (keeps map context). */
+      kind: 'reactor';
+      nodeId: string;
+      label: string;
+      /** When opened from a country drawer, allow returning to that country. */
+      fromCountryIso?: string;
+      fromCountryName?: string;
+      fromLayer?: GeographyLayer;
+      fromCompanies?: CompanySummary[];
     };

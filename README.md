@@ -10,6 +10,19 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 
 ## Key Features
 
+### Guided First Visit
+
+- **Welcome flow**: First-time visitors pick a sector, then a deployment
+  concept from translucent cards showing TRL, category and prerequisite
+  count. "Skip to the full map" is always available, and the picker can be
+  reopened from the toolbar or the empty details panel.
+- **Guided pathway**: The chosen concept's upstream chain is shown on the
+  tree, staged by dependency level. The floating guide steps through each
+  stage (←/→ keys, Esc to exit), dims everything else, and ends with links to
+  companies, the assistant, another technology, or the full map.
+- **Shareable state**: Topic, view, focused node and pathway step live in the
+  URL (`?topic=nuclear&pathway=concept_hts_tokamak&step=2`).
+
 ### Interactive Technology Graph
 
 - **Visual Technology Mapping**: Interactive graph showing fusion reactor concepts, enabling technologies, and milestones
@@ -132,13 +145,20 @@ src/
 │   ├── NodeActions.tsx          # Node action buttons
 │   ├── Legend.tsx               # Graph legend
 │   ├── MobileWarning.tsx        # Mobile device warning
-│   └── LoadingSpinner.tsx       # Loading state
+│   ├── LoadingSpinner.tsx       # Loading state
+│   ├── onboarding/              # Welcome flow (sector and technology cards)
+│   └── pathway/                 # Guided pathway floating guide
 ├── hooks/              # Custom React hooks
-│   └── useTechTree.ts  # Hook for fetching tech tree data
+│   ├── useTechTree.ts           # Shared, de-duplicated tech tree fetch
+│   ├── useExplorerUrlState.ts   # Topic/view/focus/pathway/step in the URL
+│   └── usePathwayMode.ts        # Pathway subgraph and guide steps
 ├── lib/                # Utility libraries
 │   ├── types.ts        # TypeScript type definitions
+│   ├── pathway.ts      # Upstream pathway staging and guide steps
+│   ├── technologyCatalog.ts # Picker cards for deployment concepts
+│   ├── onboardingStorage.ts # First-visit flag and last topic
+│   ├── deploymentEstimate.ts # Shared scheduler estimate
 │   ├── elkjs.ts        # Graph layout engine
-│   ├── geminiClient.ts # AI client integration
 │   ├── mongodb.ts      # MongoDB connection
 │   └── utils.ts        # Utility functions
 ```
@@ -146,8 +166,8 @@ src/
 ### State Management
 
 - **React Hooks**: Local component state management
-- **Local Storage**: Persistent chat history and user preferences
-- **Context API**: Shared state for graph interactions
+- **URL**: Topic, explorer view, focused node and guided pathway step
+- **Local Storage**: Persistent chat history, onboarding completion and last topic
 - **MongoDB**: Server-side persistent storage for all tech tree data
 
 ## Getting Started
@@ -229,6 +249,24 @@ src/
 - `npm run audit:data` - Validate active graph, company mapping, and location data
 - `npm run generate:company-locations` - Regenerate verified city coordinates
   from headquarters text using the local GeoNames gazetteer
+
+### Make Shortcuts
+
+`make help` lists everything. The common ones:
+
+- `make ready` - install dependencies, create `.env.local` if missing, start
+  MongoDB (`gaia-tt-mongo` on port 27017) and seed any empty database
+- `make dev` - start MongoDB and the dev server at
+  `http://localhost:3000/investment-tech-tree`
+- `make up` / `make down` - build and run the production image
+  (`gaia-tt-app`) with MongoDB, or stop both; `make logs` follows the app
+- `make check` - lint, typecheck and unit tests
+- `make db-status` - node, edge and company counts per database
+- `make seed` - reload nodes and edges from `data/*.json` (replaces admin edits)
+
+Chat needs the kg-service; on a workstation use `make tunnel SERVER=user@host`
+and set `KG_SERVICE_URL`/`KG_API_KEY` in `.env.local`. The `stack-*` targets
+run the full `kg/` stack and need a Linux host with an NVIDIA GPU.
 
 ### Remote Services via SSH Port Forwarding
 

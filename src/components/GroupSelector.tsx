@@ -1,7 +1,8 @@
 'use client';
 
 import React from 'react';
-import { NODE_LABELS, GroupingMode, UiNode } from '@/lib/types';
+import { NODE_LABELS, GroupingMode, NodeLabel, UiNode } from '@/lib/types';
+import { nodeRoleLabel } from '@/lib/nodeRoles';
 import {
   Select,
   SelectContent,
@@ -10,13 +11,18 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Menu, Eye } from 'lucide-react';
+import { Menu, Eye, Compass, X } from 'lucide-react';
 
 interface GroupSelectorProps {
   currentMode: GroupingMode;
   onModeChange: (mode: GroupingMode) => void;
   selectedNode?: UiNode;
   showingConnectedNodes: boolean;
+  /** A guided pathway replaces the filters with an exit control. */
+  pathwayActive?: boolean;
+  onExitPathway?: () => void;
+  /** Opens the technology picker. */
+  onChooseTechnology?: () => void;
   onReset: () => void;
   searchInput: string;
   onSearchChange: (value: string) => void;
@@ -57,6 +63,9 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
   onModeChange,
   selectedNode,
   showingConnectedNodes,
+  pathwayActive = false,
+  onExitPathway,
+  onChooseTechnology,
   onReset,
   searchInput,
   onSearchChange,
@@ -84,15 +93,28 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
   const groupingOptions: GroupingMode[] = ['None', ...NODE_LABELS];
 
   const formatOptionLabel = (option: GroupingMode): string => {
-    if (option === 'None') return 'No Grouping';
-    return `${option}`;
+    if (option === 'None') return 'No grouping';
+    return nodeRoleLabel(option as NodeLabel);
   };
 
   const shouldShowReset = showingConnectedNodes;
 
   return (
     <div className="absolute top-4 left-4 md:left-auto md:right-4 z-10">
-      {shouldShowReset ? (
+      {pathwayActive ? (
+        <div className="flex flex-col gap-2 p-3 bg-white border border-gray-200 rounded-lg shadow-sm bg-opacity-90">
+          <Button variant="outline" size="sm" onClick={onExitPathway}>
+            <X aria-hidden />
+            Exit pathway
+          </Button>
+          {onChooseTechnology && (
+            <Button variant="ghost" size="sm" onClick={onChooseTechnology}>
+              <Compass aria-hidden />
+              Choose another
+            </Button>
+          )}
+        </div>
+      ) : shouldShowReset ? (
         <div className="p-3 bg-white border border-gray-200 rounded-lg shadow-sm bg-opacity-80">
           <Button variant="outline" size="sm" onClick={onReset}>
             Reset to Show All Nodes
@@ -126,6 +148,13 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
           <div className={`p-3 bg-white border border-gray-200 rounded-lg shadow-sm bg-opacity-80 space-y-3 ${
             showOptions ? 'block' : 'hidden md:block'
           }`}>
+            {onChooseTechnology && (
+              <Button size="sm" onClick={onChooseTechnology} className="w-full">
+                <Compass aria-hidden />
+                Choose a technology to follow
+              </Button>
+            )}
+
             {/* Search Input */}
             <div className="flex items-center gap-2">
               <label

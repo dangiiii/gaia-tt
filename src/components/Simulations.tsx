@@ -3,6 +3,7 @@ import { Loader2 } from 'lucide-react';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 import { TechTree } from '@/lib/types';
 import { SimulationMode, MODE_LABELS, McsData, DistributionData } from './simulations/mcsTypes';
+import { SIMULATION_OUTPUT_FOLDERS } from '@/lib/simulationOutputs';
 import { DeterministicView } from './simulations/DeterministicView';
 import { McsView } from './simulations/McsView';
 
@@ -11,11 +12,7 @@ interface SimulationData {
   statusData: Record<string, Record<string, string>>;
 }
 
-// Topics without an entry have no precomputed simulation outputs.
-const TREE_FOLDER: Partial<Record<TopicKey, string>> = {
-  nuclear: 'nuclear_tt',
-  fossil_fuels: 'fossil_fuel_tt_v2',
-};
+const TREE_FOLDER = SIMULATION_OUTPUT_FOLDERS;
 
 const YEAR_OPTIONS = ['5', '10', '15', '20', '25', '30'];
 

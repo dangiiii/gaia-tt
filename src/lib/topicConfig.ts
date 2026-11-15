@@ -68,3 +68,10 @@ Remember: Format everything as HTML with proper tags and spacing. No plain text 
 };
 
 export const DEFAULT_TOPIC: TopicConfig = TOPICS.nuclear;
+
+export function isTopicKey(value: unknown): value is TopicKey {
+  return (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(TOPICS, value)
+  );
+}

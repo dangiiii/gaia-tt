@@ -10,7 +10,9 @@ import {
   Edge,
   MarkerType,
   ReactFlow,
+  getViewportForBounds,
   useReactFlow,
+  useStore,
 } from '@xyflow/react';
 import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
 import { Legend } from './Legend';
@@ -29,6 +31,10 @@ import EditInterface from './EditInterface';
 import { useTechTree } from '@/hooks/useTechTree';
 import { setAdminPassword, verifyAdminPassword } from '@/lib/adminClient';
 import { DEFAULT_MIN_RELEVANCE, filterSmrTechTree, isSmrTree } from '@/lib/smrFilters';
+import { pathwaySourceTree } from '@/lib/technologyCatalog';
+import { usePathwayMode } from '@/hooks/usePathwayMode';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { PathwayGuide } from './pathway/PathwayGuide';
 
 // Suppress hydration warnings for Radix UI
 if (typeof window !== 'undefined') {
@@ -50,7 +56,28 @@ interface TechTreeProps {
   onTopicChange: (value: TopicKey) => void;
   requestedTechnologyId?: string;
   technologyFocusRequestKey?: number;
+  /** Reports the node shown in the details panel so it can be shared. */
+  onFocusChange?: (nodeId: string | null) => void;
+  /** Target of the guided pathway, from the URL. */
+  pathwayTargetId?: string | null;
+  pathwayStep?: number;
+  onPathwayStepChange?: (step: number) => void;
+  /** Leaves the pathway, optionally focusing a node in the full map. */
+  onExitPathway?: (focusNodeId?: string) => void;
+  /** Opens the technology picker. */
+  onChooseTechnology?: () => void;
+  /** Side-panel tab from the URL (`panel=`). */
+  panel?: 'details' | 'chat' | 'simulations' | null;
+  onPanelChange?: (panel: 'details' | 'chat' | 'simulations') => void;
 }
+
+const MIN_ZOOM = 0.3;
+const FIT_VIEW_OPTIONS = { padding: 0.5, maxZoom: 1.25 };
+
+const EMPTY_HIGHLIGHTS: HighlightedElements = {
+  nodeIds: new Set(),
+  edgeIds: new Set(),
+};
 
 function areSetsEqual(left: Set<string>, right: Set<string>): boolean {
   return (
@@ -64,9 +91,21 @@ const TechTree: React.FC<TechTreeProps> = ({
   onTopicChange,
   requestedTechnologyId,
   technologyFocusRequestKey,
+  onFocusChange,
+  pathwayTargetId,
+  pathwayStep = 0,
+  onPathwayStepChange,
+  onExitPathway,
+  onChooseTechnology,
+  panel = null,
+  onPanelChange,
 }) => {
-  const { techTree, isLoading: isLoadingData, error } = useTechTree(topic);
-  const [isLoading, setIsLoading] = useState(true);
+  const {
+    techTree,
+    isLoading: isLoadingData,
+    error,
+    retry: retryTechTree,
+  } = useTechTree(topic);
   const [nodes, setNodes] = useState<UiNode[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const layoutedNodesRef = useRef<UiNode[]>([]);
@@ -112,6 +151,7 @@ const TechTree: React.FC<TechTreeProps> = ({
   const [minRelevance, setMinRelevance] = useState<number>(DEFAULT_MIN_RELEVANCE);
   const [sourceBackedOnly, setSourceBackedOnly] = useState<boolean>(false);
   const revealedFocusKeyRef = useRef<number | undefined>(undefined);
+  const appliedFocusRef = useRef<string | null>(null);
   const smrFilteredTree = useMemo(
     () =>
       techTree && smrTree
@@ -124,13 +164,49 @@ const TechTree: React.FC<TechTreeProps> = ({
     [techTree, smrTree, minRelevance, sourceBackedOnly, selectedCategory],
   );
 
+  // Guided pathway (URL-driven). It ignores category, search and grouping
+  // but respects the SMR detail threshold.
+  const pathwaySource = useMemo(() => {
+    if (!techTree || !pathwayTargetId) return null;
+    return smrTree ? pathwaySourceTree(techTree, minRelevance) : techTree;
+  }, [techTree, pathwayTargetId, smrTree, minRelevance]);
+  const pathwayMode = usePathwayMode({
+    sourceTree: pathwaySource,
+    targetId: pathwayTargetId,
+    step: pathwayStep,
+  });
+  const pathwayActive = pathwayMode !== null;
+  const pathwayTree = pathwayMode?.pathwayTree ?? null;
+  const currentPathwayStep = pathwayMode?.currentStep ?? null;
+  const emptyPathwayTargetId =
+    pathwayMode && !pathwayTree ? pathwayMode.pathway.targetId : null;
+  const nodeById = useMemo(
+    () => new Map((techTree?.nodes ?? []).map((node) => [node.id, node])),
+    [techTree],
+  );
+
+  // Switching topics invalidates node-specific view state.
+  const previousTopicRef = useRef(topic);
+  useEffect(() => {
+    if (previousTopicRef.current === topic) return;
+    previousTopicRef.current = topic;
+    setSelectedNode(undefined);
+    setShowingRelatedNodes(null);
+    setShowOnlyConnected(false);
+    setSearchInput('');
+    setSearchTerm('');
+    setSelectedCategory('All');
+    setHighlightedElements(EMPTY_HIGHLIGHTS);
+  }, [topic]);
+
   // Refs to imperatively switch TabPanel tabs / sub-views
   const showNodeDetailsTabRef = useRef<(() => void) | null>(null);
   const showCompaniesSubViewRef = useRef<(() => void) | null>(null);
+  const showChatTabRef = useRef<(() => void) | null>(null);
 
   const MAX_VISIBLE_COMPANIES = 5;
   
-  const { fitView } = useReactFlow();
+  const { fitView, getNodesBounds, setViewport } = useReactFlow();
 
   // Extract unique categories from nodes
   const uniqueCategories = useMemo(() => {
@@ -227,9 +303,63 @@ const TechTree: React.FC<TechTreeProps> = ({
   // Smoothly refit when entering or leaving focused literature mode.
   const litFocused =
     litViewMode === 'focused' && expandedLiteratureNodeIds.size > 0;
+  const reducedMotion = usePrefersReducedMotion();
   useEffect(() => {
-    fitView({ duration: 400, padding: 0.35 });
-  }, [litFocused, fitView]);
+    fitView({ duration: reducedMotion ? 0 : 400, padding: 0.35 });
+  }, [litFocused, fitView, reducedMotion]);
+
+  // Everything the ELK layout depends on. A pathway replaces the filtered
+  // tree with its own subgraph; identity changes mark the layout as stale.
+  const layoutInput = useMemo(() => {
+    if (!techTree) return null;
+    if (pathwayTree) {
+      return {
+        tree: pathwayTree,
+        isPathway: true,
+        groupingMode: 'None' as GroupingMode,
+        showingRelatedNodes: null,
+        showOnlyConnected: false,
+        searchTerm: '',
+      };
+    }
+
+    let tree = smrFilteredTree ?? techTree;
+    if (!smrFilteredTree && selectedCategory !== 'All') {
+      const inCategory = new Set(
+        techTree.nodes
+          .filter((node) => node.data.category === selectedCategory)
+          .map((node) => node.id),
+      );
+      tree = {
+        nodes: techTree.nodes.filter((node) => inCategory.has(node.id)),
+        edges: techTree.edges.filter(
+          (edge) => inCategory.has(edge.source) && inCategory.has(edge.target),
+        ),
+      };
+    }
+    return {
+      tree,
+      isPathway: false,
+      groupingMode,
+      showingRelatedNodes,
+      showOnlyConnected,
+      searchTerm,
+    };
+  }, [
+    techTree,
+    pathwayTree,
+    smrFilteredTree,
+    selectedCategory,
+    groupingMode,
+    showingRelatedNodes,
+    showOnlyConnected,
+    searchTerm,
+  ]);
+  const [layoutedInput, setLayoutedInput] = useState<typeof layoutInput>(null);
+  const isLayoutReady = layoutInput !== null && layoutedInput === layoutInput;
+  // Pathway layouts are framed by the step camera instead of React Flow's
+  // automatic fit, so the two never race.
+  const autoFit = !layoutInput?.isPathway;
 
   // Clear company overlay whenever the ELK layout is about to regenerate
   // so company nodes don't linger at stale positions.
@@ -240,93 +370,83 @@ const TechTree: React.FC<TechTreeProps> = ({
     setLiteratureNodes([]);
     setLiteratureEdges([]);
     setExpandedLiteratureNodeIds(new Set());
-  }, [techTree, groupingMode, showingRelatedNodes, showOnlyConnected, searchTerm, selectedCategory, smrFilteredTree]);
+  }, [layoutInput]);
 
   useEffect(() => {
-    if (!techTree) return;
+    if (!layoutInput) return;
+    // ELK is async: a slower, older layout must not overwrite a newer one.
+    let cancelled = false;
 
     const loadLayout = async () => {
-      setIsLoading(true);
-      
-      // Apply category filter
-      let filteredTechTree = smrFilteredTree ?? techTree;
-      if (!smrFilteredTree && selectedCategory !== 'All') {
-        filteredTechTree = {
-          nodes: techTree.nodes.filter(node => node.data.category === selectedCategory),
-          edges: techTree.edges.filter(edge => {
-            const sourceExists = techTree.nodes.some(n => n.id === edge.source && n.data.category === selectedCategory);
-            const targetExists = techTree.nodes.some(n => n.id === edge.target && n.data.category === selectedCategory);
-            return sourceExists && targetExists;
-          })
-        };
-      }
-      
       const { layoutedNodes, layoutedEdges } = await getLayoutedElements(
-        groupingMode,
-        showingRelatedNodes,
-        showOnlyConnected,
-        searchTerm,
-        filteredTechTree,
+        layoutInput.groupingMode,
+        layoutInput.showingRelatedNodes,
+        layoutInput.showOnlyConnected,
+        layoutInput.searchTerm,
+        layoutInput.tree,
       );
+      if (cancelled) return;
       layoutedNodesRef.current = layoutedNodes;
       layoutedEdgesRef.current = layoutedEdges;
       setNodes(() => layoutedNodes);
       setEdges(() => layoutedEdges);
-      setIsLoading(false);
-      fitView();
+      setLayoutedInput(layoutInput);
+      if (!layoutInput.isPathway) fitView(FIT_VIEW_OPTIONS);
     };
 
     loadLayout();
-  }, [
-    fitView,
-    groupingMode,
-    showingRelatedNodes,
-    showOnlyConnected,
-    searchTerm,
-    techTree,
-    selectedCategory,
-    smrFilteredTree,
-  ]);
+    return () => {
+      cancelled = true;
+    };
+  }, [fitView, layoutInput]);
 
-  // Update node and edge styles based on highlighted elements
+  const dimOthers = currentPathwayStep?.dimOthers ?? false;
+  // The "show connected" anchor is styled by the layout itself; keep it.
+  const layoutAnchorId = layoutedInput?.showingRelatedNodes ?? null;
+
+  // Update node and edge styles based on highlighted elements. Also re-runs
+  // after every layout, which replaces the styled nodes.
   useEffect(() => {
     setNodes((currentNodes) =>
-      currentNodes.map((node) => ({
-        ...node,
-        style: {
-          ...node.style,
-          borderWidth: highlightedElements.nodeIds.has(node.id) ? '3px' : '1px',
-          boxShadow: highlightedElements.nodeIds.has(node.id)
-            ? '0 0 0 2px #f97316'
-            : 'none',
-          fontWeight: highlightedElements.nodeIds.has(node.id)
-            ? 'bold'
-            : 'normal',
-        },
-      })),
+      currentNodes.map((node) => {
+        const isHighlighted =
+          highlightedElements.nodeIds.has(node.id) || node.id === layoutAnchorId;
+        return {
+          ...node,
+          style: {
+            ...node.style,
+            borderWidth: isHighlighted ? '3px' : '1px',
+            boxShadow: isHighlighted ? '0 0 0 2px #f97316' : 'none',
+            fontWeight: isHighlighted ? 'bold' : 'normal',
+            opacity: dimOthers && !isHighlighted ? 0.25 : 1,
+            transition: 'opacity 300ms ease',
+          },
+        };
+      }),
     );
 
     setEdges((currentEdges) =>
-      currentEdges.map((edge) => ({
-        ...edge,
-        style: {
-          ...edge.style,
-          strokeWidth: highlightedElements.edgeIds.has(edge.id) ? 3 : 1,
-          stroke: highlightedElements.edgeIds.has(edge.id)
-            ? '#f97316'
-            : '#374151',
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 20,
-          height: 20,
-          color: highlightedElements.edgeIds.has(edge.id)
-            ? '#f97316'
-            : '#374151',
-        },
-      })),
+      currentEdges.map((edge) => {
+        const isHighlighted = highlightedElements.edgeIds.has(edge.id);
+        return {
+          ...edge,
+          style: {
+            ...edge.style,
+            strokeWidth: isHighlighted ? 3 : 1,
+            stroke: isHighlighted ? '#f97316' : '#374151',
+            opacity: dimOthers && !isHighlighted ? 0.2 : 1,
+            transition: 'opacity 300ms ease',
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 20,
+            height: 20,
+            color: isHighlighted ? '#f97316' : '#374151',
+          },
+        };
+      }),
     );
-  }, [highlightedElements]);
+  }, [highlightedElements, dimOthers, layoutAnchorId, layoutedInput]);
 
   const handleShowCompanies = useCallback(
     async (nodeId: string) => {
@@ -722,9 +842,11 @@ const TechTree: React.FC<TechTreeProps> = ({
         if (window.innerWidth < 768) {
           setIsPanelExpanded(true);
         }
+        // The pathway step owns the URL while a pathway is active.
+        if (!pathwayActive) onFocusChange?.(nodeId);
       }
     },
-    [nodes, edges, findConnectedElements],
+    [nodes, edges, findConnectedElements, onFocusChange, pathwayActive],
   );
 
   // Called from the simulation panel when a top-N row is clicked.
@@ -746,24 +868,139 @@ const TechTree: React.FC<TechTreeProps> = ({
     (nodeId: string) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (node) {
+        // The connected view needs the full tree, so it ends a pathway.
+        if (pathwayActive) onExitPathway?.();
         setSelectedNode(() => ({ ...node }));
         setShowingRelatedNodes(nodeId);
         setShowOnlyConnected(true);
         setSearchInput('');
         setSearchTerm('');
-        setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
+        setHighlightedElements(EMPTY_HIGHLIGHTS);
+        onFocusChange?.(null);
       }
     },
-    [nodes],
+    [nodes, onFocusChange, pathwayActive, onExitPathway],
   );
 
-  const handleGroupingModeChange = useCallback((mode: GroupingMode) => {
-    setGroupingMode(mode);
-    setSelectedNode(undefined);
+  const handleExitPathway = useCallback(() => {
+    const targetId = pathwayMode?.pathway.targetId;
     setShowingRelatedNodes(null);
     setShowOnlyConnected(false);
-    setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
+    setHighlightedElements(EMPTY_HIGHLIGHTS);
+    onExitPathway?.(targetId);
+  }, [pathwayMode, onExitPathway]);
+
+  // Panel list only: the graph overlay sits left of the node, which in a
+  // pathway layout is exactly where its prerequisites are.
+  const handlePathwayShowCompanies = useCallback(() => {
+    setIsPanelExpanded(true);
+    showNodeDetailsTabRef.current?.();
+    showCompaniesSubViewRef.current?.();
   }, []);
+
+  const handlePathwayAskAssistant = useCallback(() => {
+    setIsPanelExpanded(true);
+    showChatTabRef.current?.();
+  }, []);
+
+  // Each step highlights its stage and moves the details panel along.
+  useEffect(() => {
+    if (!currentPathwayStep || !isLayoutReady) return;
+    setHighlightedElements({
+      nodeIds: new Set(currentPathwayStep.highlightNodeIds),
+      edgeIds: new Set(currentPathwayStep.highlightEdgeIds),
+    });
+    const focusNode = layoutedNodesRef.current.find(
+      (node) => node.id === currentPathwayStep.focusNodeId,
+    );
+    if (focusNode) {
+      setSelectedNode((current) => (current?.id === focusNode.id ? current : focusNode));
+    }
+    showNodeDetailsTabRef.current?.();
+  }, [currentPathwayStep, isLayoutReady]);
+
+  // Frame the step, keeping it clear of the floating guide (bottom) and the
+  // toolbars (top). The viewport is computed directly because the queued
+  // `fitView({ nodes })` only resolves after a re-measure, which never comes
+  // for this controlled graph once node styles change.
+  const graphCanvasRef = useRef<HTMLDivElement>(null);
+  const pathwayGuideRef = useRef<HTMLElement>(null);
+  const framedLayoutRef = useRef<typeof layoutInput>(null);
+  const isPanZoomReady = useStore((state) => state.panZoom !== null);
+  useEffect(() => {
+    if (!currentPathwayStep || !isLayoutReady || !isPanZoomReady) return;
+    const fitNodeIds = currentPathwayStep.fitNodeIds;
+    if (fitNodeIds.length === 0) return;
+    // Jump on a fresh layout (nothing to animate from); glide between steps.
+    const duration =
+      !reducedMotion && framedLayoutRef.current === layoutedInput ? 500 : 0;
+    const frame = requestAnimationFrame(() => {
+      framedLayoutRef.current = layoutedInput;
+      const canvas = graphCanvasRef.current;
+      if (!canvas) return;
+      const { width, height } = canvas.getBoundingClientRect();
+      const guideHeight = pathwayGuideRef.current?.offsetHeight ?? 0;
+      const viewport = getViewportForBounds(
+        getNodesBounds(fitNodeIds),
+        width,
+        height,
+        MIN_ZOOM,
+        1.25,
+        // Bare numbers are viewport ratios; pixel paddings need the unit.
+        {
+          top: '120px',
+          bottom: `${guideHeight + 88}px`,
+          left: '48px',
+          right: '48px',
+        },
+      );
+      setViewport(viewport, { duration });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    currentPathwayStep,
+    isLayoutReady,
+    isPanZoomReady,
+    layoutedInput,
+    getNodesBounds,
+    setViewport,
+    reducedMotion,
+  ]);
+
+  // No prerequisites: fall back to the existing direct-connections view, and
+  // undo it however the pathway ends (exit, new pathway, cross-view focus).
+  const emptyFallbackTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (emptyPathwayTargetId) {
+      emptyFallbackTargetRef.current = emptyPathwayTargetId;
+      setShowingRelatedNodes(emptyPathwayTargetId);
+      setShowOnlyConnected(true);
+      setSearchInput('');
+      setSearchTerm('');
+      return;
+    }
+    const fallbackTarget = emptyFallbackTargetRef.current;
+    if (!fallbackTarget) return;
+    emptyFallbackTargetRef.current = null;
+    setShowingRelatedNodes((current) => (current === fallbackTarget ? null : current));
+  }, [emptyPathwayTargetId]);
+
+  // An unknown pathway target (stale or mistyped link) falls back to the map.
+  useEffect(() => {
+    if (pathwayTargetId && techTree && !pathwayMode) onExitPathway?.();
+  }, [pathwayTargetId, techTree, pathwayMode, onExitPathway]);
+
+  const handleGroupingModeChange = useCallback(
+    (mode: GroupingMode) => {
+      setGroupingMode(mode);
+      setSelectedNode(undefined);
+      setShowingRelatedNodes(null);
+      setShowOnlyConnected(false);
+      setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
+      onFocusChange?.(null);
+    },
+    [onFocusChange],
+  );
 
   const handleReset = useCallback(() => {
     setSelectedNode(undefined);
@@ -773,18 +1010,32 @@ const TechTree: React.FC<TechTreeProps> = ({
     setSearchTerm('');
     setSelectedCategory('All');
     setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
-  }, []);
+    onFocusChange?.(null);
+  }, [onFocusChange]);
 
-  const handleSearchChange = useCallback((value: string) => {
-    setSearchInput(value);
-    setSelectedNode(undefined);
-    setShowingRelatedNodes(null);
-    setShowOnlyConnected(false);
-    setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
-  }, []);
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearchInput(value);
+      setSelectedNode(undefined);
+      setShowingRelatedNodes(null);
+      setShowOnlyConnected(false);
+      setHighlightedElements({ nodeIds: new Set(), edgeIds: new Set() });
+      onFocusChange?.(null);
+    },
+    [onFocusChange],
+  );
 
+  // Apply each focus request (URL `focus` + request key) once, after the
+  // layout that contains the node is ready, so later relayouts don't keep
+  // re-selecting it or re-opening the panel.
   useEffect(() => {
-    if (!requestedTechnologyId || isLoading) return;
+    if (!requestedTechnologyId) {
+      appliedFocusRef.current = null;
+      return;
+    }
+    if (!isLayoutReady || pathwayActive) return;
+    const focusKey = `${requestedTechnologyId}:${technologyFocusRequestKey ?? 0}`;
+    if (appliedFocusRef.current === focusKey) return;
     const node = layoutedNodesRef.current.find(
       (candidate) => candidate.id === requestedTechnologyId,
     );
@@ -804,6 +1055,7 @@ const TechTree: React.FC<TechTreeProps> = ({
       return;
     }
 
+    appliedFocusRef.current = focusKey;
     setSelectedNode((current) => (current?.id === node.id ? current : node));
     const connected = findConnectedElements(
       node.id,
@@ -820,7 +1072,8 @@ const TechTree: React.FC<TechTreeProps> = ({
   }, [
     requestedTechnologyId,
     technologyFocusRequestKey,
-    isLoading,
+    isLayoutReady,
+    pathwayActive,
     findConnectedElements,
     techTree,
     minRelevance,
@@ -835,7 +1088,7 @@ const TechTree: React.FC<TechTreeProps> = ({
           </h2>
           <p className="text-gray-600">{error}</p>
           <button
-            onClick={() => window.location.reload()}
+            onClick={retryTechTree}
             className="mt-4 rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
           >
             Retry
@@ -857,6 +1110,9 @@ const TechTree: React.FC<TechTreeProps> = ({
           onModeChange={handleGroupingModeChange}
           selectedNode={selectedNode}
           showingConnectedNodes={showingRelatedNodes !== null}
+          pathwayActive={pathwayActive}
+          onExitPathway={handleExitPathway}
+          onChooseTechnology={onChooseTechnology}
           onReset={handleReset}
           searchInput={searchInput}
           onSearchChange={handleSearchChange}
@@ -885,12 +1141,12 @@ const TechTree: React.FC<TechTreeProps> = ({
               }
             : {})}
         />
-        {isLoadingData || isLoading ? (
+        {isLoadingData || !isLayoutReady ? (
           <div className="flex-grow flex items-center justify-center h-full">
             <LoadingSpinner />
           </div>
         ) : (
-          <div className="flex-grow relative">
+          <div ref={graphCanvasRef} className="flex-grow relative">
             <ReactFlow
               nodes={
                 // Focused mode: show only the expanded node + its literature.
@@ -970,9 +1226,9 @@ const TechTree: React.FC<TechTreeProps> = ({
               draggable={false}
               nodesConnectable={false}
               colorMode={'light'}
-              fitView
-              fitViewOptions={{ padding: 0.5 }}
-              minZoom={0.3}
+              fitView={autoFit}
+              fitViewOptions={FIT_VIEW_OPTIONS}
+              minZoom={MIN_ZOOM}
               className="h-full w-full"
             >
               <Background bgColor="white" variant={BackgroundVariant.Dots} />
@@ -984,8 +1240,11 @@ const TechTree: React.FC<TechTreeProps> = ({
               />
             </ReactFlow>
             
-            {/* Knowledge Base Selector - Positioned above Legend */}
-            <KnowledgeBaseSelector topic={topic} onTopicChange={onTopicChange} />
+            {/* Knowledge Base Selector - Positioned above Legend. A pathway
+                hides it and the legend so they don't cover framed nodes. */}
+            {!pathwayActive && (
+              <KnowledgeBaseSelector topic={topic} onTopicChange={onTopicChange} />
+            )}
 
             {paperDossier && (
               <PaperDetails
@@ -1003,9 +1262,35 @@ const TechTree: React.FC<TechTreeProps> = ({
             )}
             
             {/* Legend */}
-            <div className={`${showLegend ? 'block' : 'hidden'} md:block`}>
-              <Legend />
-            </div>
+            {!pathwayActive && (
+              <div className={`${showLegend ? 'block' : 'hidden'} md:block`}>
+                <Legend />
+              </div>
+            )}
+
+            {pathwayMode && onPathwayStepChange && (
+              <PathwayGuide
+                containerRef={pathwayGuideRef}
+                topic={topic}
+                pathway={pathwayMode.pathway}
+                steps={pathwayMode.steps}
+                stepIndex={pathwayMode.stepIndex}
+                nodeById={nodeById}
+                isIsolated={
+                  !techTree?.edges.some(
+                    (edge) =>
+                      edge.source === pathwayMode.pathway.targetId ||
+                      edge.target === pathwayMode.pathway.targetId,
+                  )
+                }
+                onStepChange={onPathwayStepChange}
+                onSelectNode={handleShowDetails}
+                onExit={handleExitPathway}
+                onChooseAnother={onChooseTechnology}
+                onShowCompanies={handlePathwayShowCompanies}
+                onAskAssistant={handlePathwayAskAssistant}
+              />
+            )}
           </div>
         )}
       </div>
@@ -1021,7 +1306,7 @@ const TechTree: React.FC<TechTreeProps> = ({
         {isEditing ? (
           <EditInterface onExit={handleExitEditMode} topic={topic} />
         ) : (
-          <TabPanel 
+          <TabPanel
             selectedNode={selectedNode}
             techTree={techTree}
             isPanelExpanded={isPanelExpanded}
@@ -1030,6 +1315,10 @@ const TechTree: React.FC<TechTreeProps> = ({
             onNodeSelect={handleSimulationNodeSelect}
             onShowNodeDetailsRef={(fn) => { showNodeDetailsTabRef.current = fn; }}
             onShowCompaniesViewRef={(fn) => { showCompaniesSubViewRef.current = fn; }}
+            onShowChatRef={(fn) => { showChatTabRef.current = fn; }}
+            onChooseTechnology={onChooseTechnology}
+            panel={panel}
+            onPanelChange={onPanelChange}
           />
         )}
       </div>
