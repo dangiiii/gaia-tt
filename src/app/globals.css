@@ -118,6 +118,24 @@
   }
 }
 
+/*
+ * Tech tree level of detail (data-lod is set from the zoom level). Zoomed
+ * out, node buttons are too small to hit and labels are sub-pixel noise, so
+ * nodes fall back to role-tinted blocks that keep the tree's shape readable.
+ */
+.react-flow[data-lod='mid'] .tt-node-actions,
+.react-flow[data-lod='far'] .tt-node-actions {
+  display: none;
+}
+
+.react-flow[data-lod='far'] .tt-node-label {
+  visibility: hidden;
+}
+
+.react-flow[data-lod='far'] .react-flow__node-default {
+  background: color-mix(in srgb, var(--tt-role) 32%, white);
+}
+
 @keyframes welcome-drift {
   from {
     transform: translate3d(0, 0, 0) scale(1);

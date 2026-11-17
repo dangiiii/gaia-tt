@@ -30,6 +30,30 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 - **Relationship Visualization**: Clear depiction of dependencies and connections between technologies
 - **Node Highlighting**: Interactive selection with connected element highlighting
 
+### Scaling the Tree Down
+
+- **Aggregate nodes**: "Aggregate" in the toolbar draws each group of nodes
+  (by category & role, category, or role) as one summary node with its
+  member count, TRL range, role mix and a few member names. Links between
+  groups merge into one arrow labelled with how many links it carries.
+- **Folding and unfolding**: Clicking an aggregate unfolds it into a framed
+  group of its members; the frame's "Fold" button collapses it again, and
+  "Unfold all / Fold all" work on every group. Any node whose prerequisites
+  feed only into it gets a `−` toggle that folds that branch into the node
+  (shown as `+N`). Shared prerequisites are never hidden. The toggled element
+  stays in place on screen.
+- **Compare trees**: Shows every tech tree side by side, scaled down to
+  aggregates, with node and link counts, longest prerequisite chain, median
+  TRL, mature share, role mix and the TRL distribution on shared scales.
+  "Open aggregated" switches the main view to that tree.
+- **Zoom all the way out**: The zoom-out limit follows the tree's size, so
+  even the largest tree fits on screen, and the first view shows the whole
+  tree. Zoomed out, node buttons hide and nodes become role-coloured blocks
+  that keep the tree's shape readable.
+- **Smooth zooming**: Wheel zoom also works over the panels floating on the
+  canvas (tree picker, legend, filters, zoom buttons), and mouse-wheel notches
+  glide instead of jumping. Scrollable panels still scroll normally.
+
 ### Multi-View Explorer
 
 - **Technology View**: Preserves the dependency graph, simulations, literature
@@ -141,7 +165,11 @@ src/
 │   ├── EditTechTreePanel.tsx    # CRUD interface for editing
 │   ├── AiAssistantPanel.tsx     # Specialized AI for document analysis and edit suggestions
 │   ├── GroupSelector.tsx        # Graph grouping and filtering
-│   ├── CustomNode.tsx           # Custom node rendering
+│   ├── CustomNode.tsx           # Custom node rendering (with branch fold toggle)
+│   ├── AggregateNode.tsx        # One node standing for a whole group
+│   ├── GroupFrameNode.tsx       # Frame around an unfolded group
+│   ├── TreeComparison.tsx       # "Compare trees" dialog
+│   ├── techTreeNodeTypes.tsx    # Stable React Flow node types (context-driven)
 │   ├── NodeActions.tsx          # Node action buttons
 │   ├── Legend.tsx               # Graph legend
 │   ├── MobileWarning.tsx        # Mobile device warning
@@ -151,6 +179,7 @@ src/
 ├── hooks/              # Custom React hooks
 │   ├── useTechTree.ts           # Shared, de-duplicated tech tree fetch
 │   ├── useExplorerUrlState.ts   # Topic/view/focus/pathway/step in the URL
+│   ├── useCanvasWheel.ts        # Wheel zoom over canvas panels, smoothed notches
 │   └── usePathwayMode.ts        # Pathway subgraph and guide steps
 ├── lib/                # Utility libraries
 │   ├── types.ts        # TypeScript type definitions
@@ -158,7 +187,9 @@ src/
 │   ├── technologyCatalog.ts # Picker cards for deployment concepts
 │   ├── onboardingStorage.ts # First-visit flag and last topic
 │   ├── deploymentEstimate.ts # Shared scheduler estimate
-│   ├── elkjs.ts        # Graph layout engine
+│   ├── treeProjection.ts # Aggregation, branch folding and tree summaries
+│   ├── canvasZoom.ts   # Size-based zoom-out limit and zoom detail levels
+│   ├── elkjs.ts        # Graph layout engine (incl. frames for unfolded groups)
 │   ├── mongodb.ts      # MongoDB connection
 │   └── utils.ts        # Utility functions
 ```

@@ -4,6 +4,11 @@ import React from 'react';
 import { NODE_LABELS, GroupingMode, NodeLabel, UiNode } from '@/lib/types';
 import { nodeRoleLabel } from '@/lib/nodeRoles';
 import {
+  AGGREGATION_MODES,
+  AGGREGATION_MODE_LABELS,
+  AggregationMode,
+} from '@/lib/treeProjection';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -11,7 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Menu, Eye, Compass, X } from 'lucide-react';
+import { Menu, Eye, Compass, X, Columns3 } from 'lucide-react';
 
 interface GroupSelectorProps {
   currentMode: GroupingMode;
@@ -47,6 +52,18 @@ interface GroupSelectorProps {
   visibleNodeCount?: number;
   sourceBackedOnly?: boolean;
   onSourceBackedOnlyChange?: (value: boolean) => void;
+  /** Draw groups of nodes as single aggregate nodes. */
+  aggregationMode?: AggregationMode;
+  onAggregationModeChange?: (mode: AggregationMode) => void;
+  /** Groups in the current aggregation, and how many are unfolded. */
+  groupCount?: number;
+  expandedGroupCount?: number;
+  onUnfoldAllGroups?: () => void;
+  onFoldAllGroups?: () => void;
+  /** Nodes whose prerequisite branch is folded into them. */
+  foldedBranchCount?: number;
+  onUnfoldAllBranches?: () => void;
+  onCompareTrees?: () => void;
 }
 
 const RELEVANCE_LABELS: Record<number, string> = {
@@ -89,6 +106,15 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
   visibleNodeCount,
   sourceBackedOnly,
   onSourceBackedOnlyChange,
+  aggregationMode,
+  onAggregationModeChange,
+  groupCount,
+  expandedGroupCount = 0,
+  onUnfoldAllGroups,
+  onFoldAllGroups,
+  foldedBranchCount = 0,
+  onUnfoldAllBranches,
+  onCompareTrees,
 }) => {
   const groupingOptions: GroupingMode[] = ['None', ...NODE_LABELS];
 
@@ -152,6 +178,17 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
               <Button size="sm" onClick={onChooseTechnology} className="w-full">
                 <Compass aria-hidden />
                 Choose a technology to follow
+              </Button>
+            )}
+            {onCompareTrees && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCompareTrees}
+                className="w-full"
+              >
+                <Columns3 aria-hidden />
+                Compare trees
               </Button>
             )}
 
@@ -275,6 +312,76 @@ export const GroupSelector: React.FC<GroupSelectorProps> = ({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Aggregation: scale the tree down to one node per group */}
+            {aggregationMode && onAggregationModeChange && (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="aggregate-mode"
+                    className="text-sm font-medium text-gray-700 whitespace-nowrap"
+                    title="Draw each group of nodes as one aggregate node. Click an aggregate to unfold it."
+                  >
+                    Aggregate:
+                  </label>
+                  <Select
+                    value={aggregationMode}
+                    onValueChange={(value) =>
+                      onAggregationModeChange(value as AggregationMode)
+                    }
+                  >
+                    <SelectTrigger className="w-48" id="aggregate-mode">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AGGREGATION_MODES.map((mode) => (
+                        <SelectItem key={mode} value={mode}>
+                          {AGGREGATION_MODE_LABELS[mode]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {aggregationMode !== 'none' && groupCount !== undefined && (
+                  <div className="flex items-center justify-end gap-2 text-[11px] text-gray-500">
+                    <span className="tabular-nums">
+                      {expandedGroupCount} of {groupCount} unfolded
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onUnfoldAllGroups}
+                      disabled={expandedGroupCount >= groupCount}
+                      className="font-medium text-gray-700 underline-offset-2 hover:underline disabled:text-gray-300 disabled:no-underline"
+                    >
+                      Unfold all
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onFoldAllGroups}
+                      disabled={expandedGroupCount === 0}
+                      className="font-medium text-gray-700 underline-offset-2 hover:underline disabled:text-gray-300 disabled:no-underline"
+                    >
+                      Fold all
+                    </button>
+                  </div>
+                )}
+                {foldedBranchCount > 0 && onUnfoldAllBranches && (
+                  <div className="flex items-center justify-end gap-2 text-[11px] text-gray-500">
+                    <span className="tabular-nums">
+                      {foldedBranchCount} folded branch
+                      {foldedBranchCount === 1 ? '' : 'es'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onUnfoldAllBranches}
+                      className="font-medium text-gray-700 underline-offset-2 hover:underline"
+                    >
+                      Unfold
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Literature view mode — only when KG enrichment exists */}
             {hasLiterature && litViewMode && onLitViewModeChange && (

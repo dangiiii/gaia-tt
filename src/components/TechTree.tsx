@@ -1,8 +1,25 @@
 'use client';
 
-import { getLayoutedElements } from '@/lib/elkjs';
-import { HighlightedElements, UiNode, GroupingMode, CompanyInfo, CompanyNodeData, KgEntity, KgExpandResponse, KgPaperDossier, LiteratureNodeData } from '@/lib/types';
+import {
+  EdgeWeightData,
+  LayoutResult,
+  edgeMarker,
+  edgeStrokeWidth,
+  layoutProjection,
+  nodeShadow,
+  selectVisibleTree,
+} from '@/lib/elkjs';
+import { HighlightedElements, UiNode, GroupingMode, CompanyInfo, CompanyNodeData, KgEntity, KgExpandResponse, KgPaperDossier, LiteratureNodeData, TechTree as TechTreeData } from '@/lib/types';
 import { TopicKey } from '@/lib/topicConfig';
+import {
+  AggregationMode,
+  TreeProjection,
+  aggregateNodeId,
+  groupFrameId,
+  groupKeysOf,
+  projectTree,
+} from '@/lib/treeProjection';
+import { Bounds, minZoomForBounds } from '@/lib/canvasZoom';
 import {
   Background,
   BackgroundVariant,
@@ -10,19 +27,25 @@ import {
   Edge,
   MarkerType,
   ReactFlow,
+  XYPosition,
   getViewportForBounds,
   useReactFlow,
   useStore,
 } from '@xyflow/react';
-import React, { useCallback, useEffect, useState, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useState, useMemo, useRef } from 'react';
 import { Legend } from './Legend';
 import { LoadingSpinner } from './LoadingSpinner';
 import { GroupSelector } from './GroupSelector';
 import { KnowledgeBaseSelector } from './KnowledgeBaseSelector';
-import { CustomNode } from './CustomNode';
-import { CompanyNode } from './CompanyNode';
-import { MoreCompaniesNode, MoreCompaniesNodeData } from './MoreCompaniesNode';
-import { LiteratureNode } from './LiteratureNode';
+import { MoreCompaniesNodeData } from './MoreCompaniesNode';
+import { TECH_TREE_NODE_TYPES } from './techTreeNodeTypes';
+import {
+  TechTreeNodeActions,
+  TechTreeNodeActionsContext,
+} from './techTreeNodeActions';
+import { ZoomDetailLevelSync } from './ZoomDetailLevelSync';
+import { TreeComparison, ComparisonMode } from './TreeComparison';
+import { useCanvasWheel } from '@/hooks/useCanvasWheel';
 import PaperDetails from './PaperDetails';
 import LiteratureReview from './LiteratureReview';
 import { VoteCounts, fetchVotes, optimisticVote } from '@/lib/votes';
@@ -71,13 +94,47 @@ interface TechTreeProps {
   onPanelChange?: (panel: 'details' | 'chat' | 'simulations') => void;
 }
 
-const MIN_ZOOM = 0.3;
 const FIT_VIEW_OPTIONS = { padding: 0.5, maxZoom: 1.25 };
 
 const EMPTY_HIGHLIGHTS: HighlightedElements = {
   nodeIds: new Set(),
   edgeIds: new Set(),
 };
+
+const EMPTY_IDS: ReadonlySet<string> = new Set();
+
+/** What a layout is computed from; identity changes mark it stale. */
+interface LayoutInput {
+  /** Tree the layout came from, so a new topic never shows the old one. */
+  source: TechTreeData;
+  /** Filtered tree before aggregation and folding. */
+  visibleTree: TechTreeData;
+  projection: TreeProjection;
+  isPathway: boolean;
+  /** Node the connected-nodes view is centred on. */
+  anchorNodeId: string | null;
+  showFoldControls: boolean;
+}
+
+/**
+ * Keeps a folded or unfolded element where it was on screen after the
+ * relayout, so toggling never throws the reader somewhere else.
+ */
+interface CameraAnchor {
+  /** Id the element has after the relayout (aggregate ↔ frame). */
+  targetId: string;
+  /** Screen position of the element's top-left corner before the toggle. */
+  screen: XYPosition;
+  zoom: number;
+}
+
+function toggled(set: ReadonlySet<string>, id: string, on: boolean) {
+  if (set.has(id) === on) return set;
+  const next = new Set(set);
+  if (on) next.add(id);
+  else next.delete(id);
+  return next;
+}
 
 function areSetsEqual(left: Set<string>, right: Set<string>): boolean {
   return (
@@ -146,11 +203,18 @@ const TechTree: React.FC<TechTreeProps> = ({
   // Category filtering state
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
+  // Scaling the tree down: aggregate groups, unfold some, fold branches.
+  const [aggregationMode, setAggregationMode] = useState<AggregationMode>('none');
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(EMPTY_IDS);
+  const [foldedNodeIds, setFoldedNodeIds] = useState<ReadonlySet<string>>(EMPTY_IDS);
+  const [isComparing, setIsComparing] = useState(false);
+
   // SMR-style trees (large, relevance-rated, provenance-tagged edges)
   const smrTree = useMemo(() => isSmrTree(techTree), [techTree]);
   const [minRelevance, setMinRelevance] = useState<number>(DEFAULT_MIN_RELEVANCE);
   const [sourceBackedOnly, setSourceBackedOnly] = useState<boolean>(false);
   const revealedFocusKeyRef = useRef<number | undefined>(undefined);
+  const revealedHiddenFocusRef = useRef<string | null>(null);
   const appliedFocusRef = useRef<string | null>(null);
   const smrFilteredTree = useMemo(
     () =>
@@ -197,6 +261,9 @@ const TechTree: React.FC<TechTreeProps> = ({
     setSearchTerm('');
     setSelectedCategory('All');
     setHighlightedElements(EMPTY_HIGHLIGHTS);
+    // Group keys and node ids belong to the old tree; the mode carries over.
+    setExpandedGroups(EMPTY_IDS);
+    setFoldedNodeIds(EMPTY_IDS);
   }, [topic]);
 
   // Refs to imperatively switch TabPanel tabs / sub-views
@@ -206,7 +273,7 @@ const TechTree: React.FC<TechTreeProps> = ({
 
   const MAX_VISIBLE_COMPANIES = 5;
   
-  const { fitView, getNodesBounds, setViewport } = useReactFlow();
+  const { fitView, getNodesBounds, setViewport, getViewport } = useReactFlow();
 
   // Extract unique categories from nodes
   const uniqueCategories = useMemo(() => {
@@ -310,16 +377,16 @@ const TechTree: React.FC<TechTreeProps> = ({
 
   // Everything the ELK layout depends on. A pathway replaces the filtered
   // tree with its own subgraph; identity changes mark the layout as stale.
-  const layoutInput = useMemo(() => {
+  const layoutInput = useMemo((): LayoutInput | null => {
     if (!techTree) return null;
     if (pathwayTree) {
       return {
-        tree: pathwayTree,
+        source: techTree,
+        visibleTree: pathwayTree,
+        projection: projectTree(pathwayTree),
         isPathway: true,
-        groupingMode: 'None' as GroupingMode,
-        showingRelatedNodes: null,
-        showOnlyConnected: false,
-        searchTerm: '',
+        anchorNodeId: null,
+        showFoldControls: false,
       };
     }
 
@@ -337,13 +404,28 @@ const TechTree: React.FC<TechTreeProps> = ({
         ),
       };
     }
-    return {
-      tree,
-      isPathway: false,
+    const visibleTree = selectVisibleTree(
       groupingMode,
       showingRelatedNodes,
       showOnlyConnected,
       searchTerm,
+      tree,
+    );
+    // The connected-nodes view is already small and centred on one node, so
+    // it is never aggregated or folded.
+    const transformable = !showingRelatedNodes;
+    return {
+      source: techTree,
+      visibleTree,
+      projection: projectTree(
+        visibleTree,
+        transformable
+          ? { mode: aggregationMode, expandedGroups, foldedNodeIds }
+          : {},
+      ),
+      isPathway: false,
+      anchorNodeId: showingRelatedNodes,
+      showFoldControls: transformable,
     };
   }, [
     techTree,
@@ -354,12 +436,46 @@ const TechTree: React.FC<TechTreeProps> = ({
     showingRelatedNodes,
     showOnlyConnected,
     searchTerm,
+    aggregationMode,
+    expandedGroups,
+    foldedNodeIds,
   ]);
-  const [layoutedInput, setLayoutedInput] = useState<typeof layoutInput>(null);
+  const [layoutedInput, setLayoutedInput] = useState<LayoutInput | null>(null);
   const isLayoutReady = layoutInput !== null && layoutedInput === layoutInput;
+  // Keep the previous graph on screen while a relayout of the same tree
+  // runs (folding, filters); only a new tree shows the spinner.
+  const hasLayout = layoutedInput !== null && layoutedInput.source === techTree;
   // Pathway layouts are framed by the step camera instead of React Flow's
   // automatic fit, so the two never race.
   const autoFit = !layoutInput?.isPathway;
+
+  // Zoom-out limit: far enough to see the whole tree, however large.
+  const [layoutBounds, setLayoutBounds] = useState<Bounds | null>(null);
+  const canvasWidth = useStore((state) => state.width);
+  const canvasHeight = useStore((state) => state.height);
+  const minZoom = useMemo(
+    () => minZoomForBounds(layoutBounds, canvasWidth, canvasHeight),
+    [layoutBounds, canvasWidth, canvasHeight],
+  );
+  const fitViewOptions = useMemo(
+    () => ({ ...FIT_VIEW_OPTIONS, minZoom }),
+    [minZoom],
+  );
+
+  const groupKeys = useMemo(
+    () =>
+      layoutInput && !layoutInput.isPathway && !layoutInput.anchorNodeId
+        ? groupKeysOf(layoutInput.visibleTree, aggregationMode)
+        : [],
+    [layoutInput, aggregationMode],
+  );
+  const foldedBranchCount = useMemo(
+    () =>
+      layoutInput?.projection.nodes.filter(
+        (node) => node.kind === 'node' && node.foldedCount > 0,
+      ).length ?? 0,
+    [layoutInput],
+  );
 
   // Clear company overlay whenever the ELK layout is about to regenerate
   // so company nodes don't linger at stale positions.
@@ -372,43 +488,100 @@ const TechTree: React.FC<TechTreeProps> = ({
     setExpandedLiteratureNodeIds(new Set());
   }, [layoutInput]);
 
+  // Set by a fold/unfold just before the relayout it causes.
+  const pendingAnchorRef = useRef<CameraAnchor | null>(null);
+  // How to frame a finished layout; consumed once the canvas can move.
+  const cameraRequestRef = useRef<{
+    layout: LayoutInput;
+    anchor: CameraAnchor | null;
+  } | null>(null);
+  const layoutResultRef = useRef<LayoutResult | null>(null);
+
   useEffect(() => {
     if (!layoutInput) return;
     // ELK is async: a slower, older layout must not overwrite a newer one.
     let cancelled = false;
 
     const loadLayout = async () => {
-      const { layoutedNodes, layoutedEdges } = await getLayoutedElements(
-        layoutInput.groupingMode,
-        layoutInput.showingRelatedNodes,
-        layoutInput.showOnlyConnected,
-        layoutInput.searchTerm,
-        layoutInput.tree,
-      );
+      const result = await layoutProjection(layoutInput.projection, {
+        anchorNodeId: layoutInput.anchorNodeId,
+        showFoldControls: layoutInput.showFoldControls,
+      });
       if (cancelled) return;
-      layoutedNodesRef.current = layoutedNodes;
-      layoutedEdgesRef.current = layoutedEdges;
-      setNodes(() => layoutedNodes);
-      setEdges(() => layoutedEdges);
+      layoutResultRef.current = result;
+      layoutedNodesRef.current = result.layoutedNodes;
+      layoutedEdgesRef.current = result.layoutedEdges;
+      setNodes(() => result.layoutedNodes);
+      setEdges(() => result.layoutedEdges);
+      setLayoutBounds(result.bounds);
       setLayoutedInput(layoutInput);
-      if (!layoutInput.isPathway) fitView(FIT_VIEW_OPTIONS);
+      cameraRequestRef.current = {
+        layout: layoutInput,
+        anchor: pendingAnchorRef.current,
+      };
+      pendingAnchorRef.current = null;
     };
 
     loadLayout();
     return () => {
       cancelled = true;
     };
-  }, [fitView, layoutInput]);
+  }, [layoutInput]);
+
+  const isPanZoomReady = useStore((state) => state.panZoom !== null);
+
+  // Frame each new layout once it is on screen: a fold keeps the toggled
+  // element in place, anything else shows the whole tree. Runs before paint
+  // so the new layout never flashes at the old camera.
+  useLayoutEffect(() => {
+    const request = cameraRequestRef.current;
+    if (
+      !request ||
+      request.layout !== layoutedInput ||
+      !isPanZoomReady ||
+      !canvasWidth ||
+      !canvasHeight
+    ) {
+      return;
+    }
+    cameraRequestRef.current = null;
+    if (request.layout.isPathway) return;
+    if (request.anchor) {
+      const { targetId, screen, zoom: previousZoom } = request.anchor;
+      const position = layoutResultRef.current?.absolutePositions.get(targetId);
+      if (position) {
+        const zoom = Math.max(previousZoom, minZoom);
+        setViewport({
+          x: screen.x - position.x * zoom,
+          y: screen.y - position.y * zoom,
+          zoom,
+        });
+      }
+      return;
+    }
+    fitView(fitViewOptions);
+  }, [
+    layoutedInput,
+    isPanZoomReady,
+    canvasWidth,
+    canvasHeight,
+    minZoom,
+    fitView,
+    fitViewOptions,
+    setViewport,
+  ]);
 
   const dimOthers = currentPathwayStep?.dimOthers ?? false;
   // The "show connected" anchor is styled by the layout itself; keep it.
-  const layoutAnchorId = layoutedInput?.showingRelatedNodes ?? null;
+  const layoutAnchorId = layoutedInput?.anchorNodeId ?? null;
 
   // Update node and edge styles based on highlighted elements. Also re-runs
   // after every layout, which replaces the styled nodes.
   useEffect(() => {
     setNodes((currentNodes) =>
       currentNodes.map((node) => {
+        // Frames are backdrops; they keep their own look.
+        if (node.type === 'groupFrame') return node;
         const isHighlighted =
           highlightedElements.nodeIds.has(node.id) || node.id === layoutAnchorId;
         return {
@@ -416,7 +589,7 @@ const TechTree: React.FC<TechTreeProps> = ({
           style: {
             ...node.style,
             borderWidth: isHighlighted ? '3px' : '1px',
-            boxShadow: isHighlighted ? '0 0 0 2px #f97316' : 'none',
+            boxShadow: nodeShadow(node, isHighlighted),
             fontWeight: isHighlighted ? 'bold' : 'normal',
             opacity: dimOthers && !isHighlighted ? 0.25 : 1,
             transition: 'opacity 300ms ease',
@@ -428,21 +601,20 @@ const TechTree: React.FC<TechTreeProps> = ({
     setEdges((currentEdges) =>
       currentEdges.map((edge) => {
         const isHighlighted = highlightedElements.edgeIds.has(edge.id);
+        // Aggregated edges are drawn thicker by how many links they carry.
+        const weight = (edge.data as EdgeWeightData | undefined)?.weight ?? 1;
+        const baseWidth = edgeStrokeWidth(weight);
+        const color = isHighlighted ? '#f97316' : '#374151';
         return {
           ...edge,
           style: {
             ...edge.style,
-            strokeWidth: isHighlighted ? 3 : 1,
-            stroke: isHighlighted ? '#f97316' : '#374151',
+            strokeWidth: isHighlighted ? baseWidth + 2 : baseWidth,
+            stroke: color,
             opacity: dimOthers && !isHighlighted ? 0.2 : 1,
             transition: 'opacity 300ms ease',
           },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 20,
-            height: 20,
-            color: isHighlighted ? '#f97316' : '#374151',
-          },
+          markerEnd: edgeMarker(color, weight),
         };
       }),
     );
@@ -491,6 +663,10 @@ const TechTree: React.FC<TechTreeProps> = ({
 
         const parentNode = nodes.find((n) => n.id === nodeId);
         if (!parentNode) return;
+        // Members of an unfolded group are positioned inside its frame.
+        const parentPosition =
+          layoutResultRef.current?.absolutePositions.get(nodeId) ??
+          parentNode.position;
 
         const visibleCompanies = allCompanies.slice(0, MAX_VISIBLE_COMPANIES);
         const remainingCount = allCompanies.length - visibleCompanies.length;
@@ -498,10 +674,10 @@ const TechTree: React.FC<TechTreeProps> = ({
         const companyWidth = 140;
         const companyHeight = 80;
         const companyGap = 10;
-        const px = parentNode.position.x - companyWidth - 30;
+        const px = parentPosition.x - companyWidth - 30;
         const visibleCount = visibleCompanies.length + (remainingCount > 0 ? 1 : 0);
         const totalHeight = visibleCount * (companyHeight + companyGap) - companyGap;
-        const startY = parentNode.position.y + 40 - totalHeight / 2;
+        const startY = parentPosition.y + 40 - totalHeight / 2;
 
         const newCompanyNodes: UiNode[] = visibleCompanies.map((company, index) => ({
           id: `company-${company.id}`,
@@ -641,15 +817,18 @@ const TechTree: React.FC<TechTreeProps> = ({
 
         const parentNode = nodes.find((n) => n.id === nodeId);
         if (!parentNode) return;
+        const parentPosition =
+          layoutResultRef.current?.absolutePositions.get(nodeId) ??
+          parentNode.position;
 
         const litWidth = 160;
         const litHeight = 80;
         const litGap = 10;
         // Literature nodes render to the RIGHT of the parent (companies go left).
-        const px = parentNode.position.x + 150 + 30;
+        const px = parentPosition.x + 150 + 30;
         const totalHeight =
           data.entities.length * (litHeight + litGap) - litGap;
-        const startY = parentNode.position.y + 40 - totalHeight / 2;
+        const startY = parentPosition.y + 40 - totalHeight / 2;
 
         const kindBorder: Record<string, string> = {
           paper: '#6366f1',
@@ -923,10 +1102,9 @@ const TechTree: React.FC<TechTreeProps> = ({
   // toolbars (top). The viewport is computed directly because the queued
   // `fitView({ nodes })` only resolves after a re-measure, which never comes
   // for this controlled graph once node styles change.
-  const graphCanvasRef = useRef<HTMLDivElement>(null);
+  const graphCanvasRef = useRef<HTMLDivElement | null>(null);
   const pathwayGuideRef = useRef<HTMLElement>(null);
   const framedLayoutRef = useRef<typeof layoutInput>(null);
-  const isPanZoomReady = useStore((state) => state.panZoom !== null);
   useEffect(() => {
     if (!currentPathwayStep || !isLayoutReady || !isPanZoomReady) return;
     const fitNodeIds = currentPathwayStep.fitNodeIds;
@@ -944,7 +1122,7 @@ const TechTree: React.FC<TechTreeProps> = ({
         getNodesBounds(fitNodeIds),
         width,
         height,
-        MIN_ZOOM,
+        minZoom,
         1.25,
         // Bare numbers are viewport ratios; pixel paddings need the unit.
         {
@@ -965,6 +1143,7 @@ const TechTree: React.FC<TechTreeProps> = ({
     getNodesBounds,
     setViewport,
     reducedMotion,
+    minZoom,
   ]);
 
   // No prerequisites: fall back to the existing direct-connections view, and
@@ -989,6 +1168,60 @@ const TechTree: React.FC<TechTreeProps> = ({
   useEffect(() => {
     if (pathwayTargetId && techTree && !pathwayMode) onExitPathway?.();
   }, [pathwayTargetId, techTree, pathwayMode, onExitPathway]);
+
+  // Remembers where the toggled element sits on screen so the relayout can
+  // put it back there (see CameraAnchor).
+  const captureAnchor = useCallback(
+    (currentId: string, targetId: string) => {
+      const position = layoutResultRef.current?.absolutePositions.get(currentId);
+      if (!position) return;
+      const { x, y, zoom } = getViewport();
+      pendingAnchorRef.current = {
+        targetId,
+        screen: { x: position.x * zoom + x, y: position.y * zoom + y },
+        zoom,
+      };
+    },
+    [getViewport],
+  );
+
+  const handleToggleFold = useCallback(
+    (nodeId: string) => {
+      captureAnchor(nodeId, nodeId);
+      setFoldedNodeIds((current) => toggled(current, nodeId, !current.has(nodeId)));
+    },
+    [captureAnchor],
+  );
+
+  const handleExpandGroup = useCallback(
+    (groupKey: string, aggregateId: string) => {
+      captureAnchor(aggregateId, groupFrameId(groupKey));
+      setExpandedGroups((current) => toggled(current, groupKey, true));
+    },
+    [captureAnchor],
+  );
+
+  const handleCollapseGroup = useCallback(
+    (groupKey: string, frameId: string) => {
+      captureAnchor(frameId, aggregateNodeId(groupKey));
+      setExpandedGroups((current) => toggled(current, groupKey, false));
+    },
+    [captureAnchor],
+  );
+
+  const handleAggregationModeChange = useCallback((mode: AggregationMode) => {
+    setAggregationMode(mode);
+    setExpandedGroups(EMPTY_IDS);
+  }, []);
+
+  const handleOpenComparedTopic = useCallback(
+    (nextTopic: TopicKey, mode: ComparisonMode) => {
+      setIsComparing(false);
+      handleAggregationModeChange(mode);
+      if (nextTopic !== topic) onTopicChange(nextTopic);
+    },
+    [handleAggregationModeChange, onTopicChange, topic],
+  );
 
   const handleGroupingModeChange = useCallback(
     (mode: GroupingMode) => {
@@ -1040,6 +1273,22 @@ const TechTree: React.FC<TechTreeProps> = ({
       (candidate) => candidate.id === requestedTechnologyId,
     );
     if (!node) {
+      // Drawn inside an aggregate or a folded branch: open that up once per
+      // focus request, then the next layout contains the node.
+      const projection = layoutInput?.projection;
+      const drawnAs = projection?.representative.get(requestedTechnologyId);
+      if (projection && drawnAs && drawnAs !== requestedTechnologyId) {
+        const revealKey = `${focusKey}>${drawnAs}`;
+        if (revealedHiddenFocusRef.current === revealKey) return;
+        revealedHiddenFocusRef.current = revealKey;
+        const groupKey = projection.groupKeyOf.get(requestedTechnologyId);
+        if (groupKey && drawnAs === aggregateNodeId(groupKey)) {
+          setExpandedGroups((current) => toggled(current, groupKey, true));
+        } else {
+          setFoldedNodeIds((current) => toggled(current, drawnAs, false));
+        }
+        return;
+      }
       // Hidden by the SMR detail threshold: lower it once per focus request
       // so the node gets laid out (without fighting later slider changes).
       const smr = techTree?.nodes.find((n) => n.id === requestedTechnologyId)?.data.smr;
@@ -1077,7 +1326,89 @@ const TechTree: React.FC<TechTreeProps> = ({
     findConnectedElements,
     techTree,
     minRelevance,
+    layoutInput,
   ]);
+
+  const nodeActions = useMemo<TechTreeNodeActions>(
+    () => ({
+      onShowDetails: handleShowDetails,
+      onShowConnected: handleShowConnected,
+      onShowCompanies: handleShowCompanies,
+      isCompaniesExpanded: (id) => expandedCompanyNodeIds.has(id),
+      literatureFor: (id) => enrichedNodes.get(id),
+      onShowLiterature: handleShowLiterature,
+      isLiteratureExpanded: (id) => expandedLiteratureNodeIds.has(id),
+      onShowPaper: handleShowPaper,
+      votesFor: (id) => litVotes.get(id),
+      onLitVote: handleLitVote,
+      onShowCompanyDetails: handleShowCompanyDetails,
+      onShowMoreCompanies: handleShowMoreCompanies,
+      onToggleFold: handleToggleFold,
+      onExpandGroup: handleExpandGroup,
+      onCollapseGroup: handleCollapseGroup,
+    }),
+    [
+      handleShowDetails,
+      handleShowConnected,
+      handleShowCompanies,
+      expandedCompanyNodeIds,
+      enrichedNodes,
+      handleShowLiterature,
+      expandedLiteratureNodeIds,
+      handleShowPaper,
+      litVotes,
+      handleLitVote,
+      handleShowCompanyDetails,
+      handleShowMoreCompanies,
+      handleToggleFold,
+      handleExpandGroup,
+      handleCollapseGroup,
+    ],
+  );
+
+  // Stable arrays, so React Flow only re-diffs when something changed.
+  const flowNodes = useMemo(
+    () =>
+      // Focused mode: show only the expanded node + its literature.
+      litFocused
+        ? [
+            ...nodes.filter((n) => expandedLiteratureNodeIds.has(n.id)),
+            ...literatureNodes,
+          ]
+        : [...nodes, ...companyNodes, ...literatureNodes],
+    [litFocused, nodes, companyNodes, literatureNodes, expandedLiteratureNodeIds],
+  );
+  const flowEdges = useMemo(
+    () =>
+      (litFocused
+        ? literatureEdges.filter((e) =>
+            [...expandedLiteratureNodeIds].some((id) =>
+              e.id.startsWith(`lit-edge-${id}-`),
+            ),
+          )
+        : [...edges, ...companyEdges, ...literatureEdges]
+      ).map((e) =>
+        !showLitEdgeLabels && e.id.startsWith('lit-edge-')
+          ? { ...e, label: undefined }
+          : e,
+      ),
+    [
+      litFocused,
+      edges,
+      companyEdges,
+      literatureEdges,
+      expandedLiteratureNodeIds,
+      showLitEdgeLabels,
+    ],
+  );
+
+  // The canvas mounts after the first layout, so track the element itself.
+  const [canvasElement, setCanvasElement] = useState<HTMLDivElement | null>(null);
+  const setGraphCanvas = useCallback((element: HTMLDivElement | null) => {
+    graphCanvasRef.current = element;
+    setCanvasElement(element);
+  }, []);
+  useCanvasWheel(canvasElement);
 
   if (error) {
     return (
@@ -1131,6 +1462,17 @@ const TechTree: React.FC<TechTreeProps> = ({
           selectedCategory={selectedCategory}
           categories={uniqueCategories}
           onCategoryChange={setSelectedCategory}
+          aggregationMode={aggregationMode}
+          onAggregationModeChange={handleAggregationModeChange}
+          groupCount={groupKeys.length}
+          expandedGroupCount={
+            groupKeys.filter((key) => expandedGroups.has(key)).length
+          }
+          onUnfoldAllGroups={() => setExpandedGroups(new Set(groupKeys))}
+          onFoldAllGroups={() => setExpandedGroups(EMPTY_IDS)}
+          foldedBranchCount={foldedBranchCount}
+          onUnfoldAllBranches={() => setFoldedNodeIds(EMPTY_IDS)}
+          onCompareTrees={() => setIsComparing(true)}
           {...(smrTree
             ? {
                 minRelevance,
@@ -1141,104 +1483,40 @@ const TechTree: React.FC<TechTreeProps> = ({
               }
             : {})}
         />
-        {isLoadingData || !isLayoutReady ? (
+        {isLoadingData || !hasLayout ? (
           <div className="flex-grow flex items-center justify-center h-full">
             <LoadingSpinner />
           </div>
         ) : (
-          <div ref={graphCanvasRef} className="flex-grow relative">
-            <ReactFlow
-              nodes={
-                // Focused mode: show only the expanded node + its literature.
-                litFocused
-                  ? [
-                      ...nodes.filter((n) => expandedLiteratureNodeIds.has(n.id)),
-                      ...literatureNodes,
-                    ]
-                  : [...nodes, ...companyNodes, ...literatureNodes]
-              }
-              edges={(
-                litFocused
-                  ? literatureEdges.filter((e) =>
-                      [...expandedLiteratureNodeIds].some((id) =>
-                        e.id.startsWith(`lit-edge-${id}-`),
-                      ),
-                    )
-                  : [...edges, ...companyEdges, ...literatureEdges]
-              ).map((e) =>
-                !showLitEdgeLabels && e.id.startsWith('lit-edge-')
-                  ? { ...e, label: undefined }
-                  : e,
-              )}
-              nodeTypes={{
-                default: (props) => (
-                  <CustomNode
-                    {...props}
-                    onShowDetails={handleShowDetails}
-                    onShowConnected={handleShowConnected}
-                    onShowCompanies={handleShowCompanies}
-                    isCompaniesExpanded={(id) => expandedCompanyNodeIds.has(id)}
-                    onShowLiterature={
-                      enrichedNodes.has(props.id) ? handleShowLiterature : undefined
-                    }
-                    isLiteratureExpanded={(id) => expandedLiteratureNodeIds.has(id)}
-                    literatureCount={enrichedNodes.get(props.id)?.papers}
-                  />
-                ),
-                literature: (props) => {
-                  const litData = props.data as unknown as LiteratureNodeData;
-                  return (
-                    <LiteratureNode
-                      {...props}
-                      data={litData}
-                      onShowPaper={handleShowPaper}
-                      votes={litVotes.get(litData.entity.id)}
-                      onVote={(v) => handleLitVote(litData.entity.id, v)}
-                    />
-                  );
-                },
-                company: (props) => {
-                  const companyData = props.data as unknown as CompanyNodeData;
-                  return (
-                    <CompanyNode
-                      {...props}
-                      data={companyData}
-                      onShowCompanyDetails={handleShowCompanyDetails}
-                    />
-                  );
-                },
-                moreCompanies: (props) => {
-                  const moreData = props.data as unknown as MoreCompaniesNodeData;
-                  return (
-                    <MoreCompaniesNode
-                      {...props}
-                      data={moreData}
-                      onShowParentCompanies={handleShowMoreCompanies}
-                    />
-                  );
-                },
-              }}
-              onNodesChange={undefined}
-              onEdgesChange={undefined}
-              onConnect={undefined}
-              onEdgeClick={undefined}
-              onNodeDragStop={undefined}
-              draggable={false}
-              nodesConnectable={false}
-              colorMode={'light'}
-              fitView={autoFit}
-              fitViewOptions={FIT_VIEW_OPTIONS}
-              minZoom={MIN_ZOOM}
-              className="h-full w-full"
-            >
-              <Background bgColor="white" variant={BackgroundVariant.Dots} />
-              <Controls 
-                showInteractive={false} 
-                showZoom={true} 
-                showFitView={true}
-                className="!left-4 !top-[180px] !bottom-auto md:!top-auto md:!bottom-4"
-              />
-            </ReactFlow>
+          <div ref={setGraphCanvas} className="flex-grow relative overscroll-none">
+            <TechTreeNodeActionsContext.Provider value={nodeActions}>
+              <ReactFlow
+                nodes={flowNodes}
+                edges={flowEdges}
+                nodeTypes={TECH_TREE_NODE_TYPES}
+                onNodesChange={undefined}
+                onEdgesChange={undefined}
+                onConnect={undefined}
+                onEdgeClick={undefined}
+                onNodeDragStop={undefined}
+                draggable={false}
+                nodesConnectable={false}
+                colorMode={'light'}
+                fitView={autoFit}
+                fitViewOptions={fitViewOptions}
+                minZoom={minZoom}
+                className="h-full w-full"
+              >
+                <Background bgColor="white" variant={BackgroundVariant.Dots} />
+                <Controls
+                  showInteractive={false}
+                  showZoom={true}
+                  showFitView={true}
+                  className="!left-4 !top-[180px] !bottom-auto md:!top-auto md:!bottom-4"
+                />
+                <ZoomDetailLevelSync />
+              </ReactFlow>
+            </TechTreeNodeActionsContext.Provider>
             
             {/* Knowledge Base Selector - Positioned above Legend. A pathway
                 hides it and the legend so they don't cover framed nodes. */}
@@ -1264,7 +1542,9 @@ const TechTree: React.FC<TechTreeProps> = ({
             {/* Legend */}
             {!pathwayActive && (
               <div className={`${showLegend ? 'block' : 'hidden'} md:block`}>
-                <Legend />
+                <Legend
+                  showAggregates={aggregationMode !== 'none' || foldedBranchCount > 0}
+                />
               </div>
             )}
 
@@ -1322,6 +1602,13 @@ const TechTree: React.FC<TechTreeProps> = ({
           />
         )}
       </div>
+      <TreeComparison
+        open={isComparing}
+        onOpenChange={setIsComparing}
+        currentTopic={topic}
+        initialMode={aggregationMode === 'none' ? 'category-role' : aggregationMode}
+        onOpenTopic={handleOpenComparedTopic}
+      />
     </div>
   );
 };

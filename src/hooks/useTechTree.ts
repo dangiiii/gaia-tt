@@ -9,7 +9,8 @@ import { TopicKey } from '@/lib/topicConfig';
 const inFlightTrees = new Map<TopicKey, Promise<TechTree>>();
 const resolvedTrees = new Map<TopicKey, TechTree>();
 
-function loadTechTree(topic: TopicKey): Promise<TechTree> {
+/** Loads (once) and caches a topic's tree; shared with `useTechTree`. */
+export function loadTechTree(topic: TopicKey): Promise<TechTree> {
   const existing = inFlightTrees.get(topic);
   if (existing) return existing;
 
