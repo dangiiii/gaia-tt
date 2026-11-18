@@ -4,6 +4,7 @@ import { type Ref, useEffect, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  BookmarkPlus,
   Building2,
   ChevronDown,
   ChevronUp,
@@ -40,7 +41,10 @@ interface PathwayGuideProps {
   onExit: () => void;
   onChooseAnother?: () => void;
   onShowCompanies: () => void;
+  /** Opens the chat, which is about this pathway while it is open. */
   onAskAssistant: () => void;
+  /** Keeps the pathway's nodes as a custom tree. */
+  onSaveAsTree?: () => void;
 }
 
 const ROLE_LABELS = NODE_ROLE_LABELS;
@@ -64,6 +68,7 @@ export function PathwayGuide({
   onChooseAnother,
   onShowCompanies,
   onAskAssistant,
+  onSaveAsTree,
 }: PathwayGuideProps) {
   const [collapsed, setCollapsed] = useState(false);
   const step = steps[stepIndex];
@@ -190,6 +195,28 @@ export function PathwayGuide({
             variant="ghost"
             size="icon"
             className="h-8 w-8"
+            onClick={onAskAssistant}
+            aria-label="Ask the assistant about this pathway"
+            title="Ask the assistant about this pathway"
+          >
+            <MessageSquare aria-hidden />
+          </Button>
+          {onSaveAsTree && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={onSaveAsTree}
+              aria-label="Save this pathway as my tree"
+              title="Save this pathway as my tree"
+            >
+              <BookmarkPlus aria-hidden />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
             onClick={() => setCollapsed(true)}
             aria-label="Collapse pathway guide"
           >
@@ -274,6 +301,12 @@ export function PathwayGuide({
               <MessageSquare aria-hidden />
               Ask the assistant
             </Button>
+            {onSaveAsTree && (
+              <Button variant="outline" size="sm" onClick={onSaveAsTree}>
+                <BookmarkPlus aria-hidden />
+                Save as my tree
+              </Button>
+            )}
             {onChooseAnother && (
               <Button variant="outline" size="sm" onClick={onChooseAnother}>
                 <Compass aria-hidden />

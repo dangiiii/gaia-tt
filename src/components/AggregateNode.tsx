@@ -34,16 +34,46 @@ export function AggregateNode({ id, data }: NodeProps) {
   const unfoldLabel = `Unfold ${heading}${
     aggregate.subtitle ? ` in ${aggregate.title}` : ''
   } (${count} node${count === 1 ? '' : 's'})`;
+  // Building a tree: the body adds or removes the whole group instead.
+  const builder = actions?.builder ?? null;
+  const inTree = builder ? builder.countOf(aggregate.memberIds) : 0;
+  const onBodyClick = builder
+    ? (event: React.MouseEvent) => {
+        event.stopPropagation();
+        builder.toggleGroup(aggregate.memberIds);
+      }
+    : unfold;
 
   return (
     <div
       className={`relative flex h-full w-full flex-col gap-1.5 px-3 py-2.5 text-left ${
-        unfold ? 'cursor-pointer' : ''
+        onBodyClick ? 'cursor-pointer' : ''
       }`}
-      onClick={unfold}
+      onClick={onBodyClick}
       onDoubleClick={(event) => event.stopPropagation()}
-      title={unfold ? unfoldLabel : undefined}
+      title={
+        builder
+          ? inTree === count
+            ? 'Click to remove the whole group from your tree'
+            : 'Click to add the whole group to your tree'
+          : unfold
+            ? unfoldLabel
+            : undefined
+      }
     >
+      {builder && (
+        <span
+          className={`absolute -bottom-2.5 -right-2.5 z-10 rounded-full border-2 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums shadow-sm ${
+            inTree === count
+              ? 'border-blue-600 bg-blue-600 text-white'
+              : inTree > 0
+                ? 'border-blue-600 bg-white text-blue-700'
+                : 'border-gray-300 bg-white text-gray-500'
+          }`}
+        >
+          {inTree} of {count} in tree
+        </span>
+      )}
       <Handle type="target" position={Position.Left} className="opacity-0" />
 
       <div className="flex items-start justify-between gap-2">

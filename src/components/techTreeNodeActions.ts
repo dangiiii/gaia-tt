@@ -29,6 +29,18 @@ export interface TechTreeNodeActions {
   onExpandGroup: (groupKey: string, aggregateId: string) => void;
   /** Folds a frame back into its aggregate. */
   onCollapseGroup: (groupKey: string, frameId: string) => void;
+  /** Present while a custom tree is being built; null otherwise. */
+  builder: TreeBuilderActions | null;
+}
+
+/** Picking nodes for a custom tree straight on the canvas. */
+export interface TreeBuilderActions {
+  has: (nodeId: string) => boolean;
+  /** How many of `nodeIds` are in the tree. */
+  countOf: (nodeIds: string[]) => number;
+  toggle: (nodeId: string) => void;
+  /** Adds all of `nodeIds`, or removes them if all are already in. */
+  toggleGroup: (nodeIds: string[]) => void;
 }
 
 /** Null outside the main tree (e.g. comparison previews): nodes go static. */

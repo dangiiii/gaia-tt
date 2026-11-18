@@ -8,6 +8,7 @@ import Simulations from './Simulations';
 import { UiNode, TechTree } from '@/lib/types';
 import { TopicKey } from '@/lib/topicConfig';
 import { ExplorerPanel } from '@/lib/explorerUrlState';
+import { ChatScope } from '@/lib/chatContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 
@@ -26,6 +27,8 @@ interface TabPanelProps {
   /** URL `panel` value; null means details. */
   panel?: ExplorerPanel | null;
   onPanelChange?: (panel: ExplorerPanel) => void;
+  /** What the chat talks about (pathway, custom tree, view…). */
+  chatScope?: ChatScope | null;
 }
 
 type TabType = ExplorerPanel;
@@ -43,6 +46,7 @@ const TabPanel = ({
   onChooseTechnology,
   panel = null,
   onPanelChange,
+  chatScope = null,
 }: TabPanelProps) => {
   const [activeTab, setActiveTab] = useState<TabType>(panel ?? 'details');
   const [nodeDetailsSubView, setNodeDetailsSubView] = useState<NodeDetailsSubView>('info');
@@ -156,7 +160,7 @@ const TabPanel = ({
           </TabsList>
 
           <TabsContent value="chat" className="flex-1 overflow-y-auto mt-0">
-            <Chat topic={topic} />
+            <Chat topic={topic} scope={chatScope} />
           </TabsContent>
 
           <TabsContent value="details" className="flex-1 overflow-y-auto mt-0">

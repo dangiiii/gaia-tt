@@ -136,6 +136,12 @@
   background: color-mix(in srgb, var(--tt-role) 32%, white);
 }
 
+/* A fold or unfold is being laid out; the morph follows. */
+[data-relayout='pending'] .react-flow__pane,
+[data-relayout='pending'] .react-flow__node {
+  cursor: progress;
+}
+
 @keyframes welcome-drift {
   from {
     transform: translate3d(0, 0, 0) scale(1);

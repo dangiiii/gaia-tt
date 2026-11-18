@@ -42,10 +42,18 @@ The platform features a full CRUD interface for editing the technology tree, AI-
   feed only into it gets a `−` toggle that folds that branch into the node
   (shown as `+N`). Shared prerequisites are never hidden. The toggled element
   stays in place on screen.
-- **Compare trees**: Shows every tech tree side by side, scaled down to
-  aggregates, with node and link counts, longest prerequisite chain, median
-  TRL, mature share, role mix and the TRL distribution on shared scales.
-  "Open aggregated" switches the main view to that tree.
+- **Animated folding**: Folds and unfolds morph instead of jumping: nodes
+  glide to their new places, unfolded nodes grow out of the node or
+  aggregate that held them, folded ones glide back into it, and a frame
+  grows out of its aggregate. If an unfold grows past the screen edge, the
+  camera glides to show it. Respects "reduce motion".
+- **Compare trees**: Puts up to four trees side by side (tech trees and your
+  own trees), scaled down to aggregates, with node and link counts, longest
+  prerequisite chain, median TRL, mature share, role mix and the TRL
+  distribution on shared scales. The first column is the baseline; for trees
+  of the same topic an "Overlap with baseline" row counts shared nodes and
+  lists the ones only a tree has. "Open aggregated" switches the main view to
+  that tree.
 - **Zoom all the way out**: The zoom-out limit follows the tree's size, so
   even the largest tree fits on screen, and the first view shows the whole
   tree. Zoomed out, node buttons hide and nodes become role-coloured blocks
@@ -53,6 +61,24 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 - **Smooth zooming**: Wheel zoom also works over the panels floating on the
   canvas (tree picker, legend, filters, zoom buttons), and mouse-wheel notches
   glide instead of jumping. Scrollable panels still scroll normally.
+
+### Your Own Trees
+
+- **Build**: "My trees → New tree" (or "From current view") turns on the
+  tree builder: click nodes to add or remove them, click an aggregate to take
+  its whole group, Shift+drag to pick an area, and grow the selection with
+  its prerequisites, dependents or everything the current filters show.
+  Give it a name and notes, and save.
+- **Quick save**: Save a guided pathway, a connected-nodes view or a
+  search/filter result as a tree in one step.
+- **Select**: Saved trees appear in the tree picker and under "My trees".
+  Opening one shows only its nodes (the URL gets `tree=`), with search,
+  filters, aggregation and folding working as usual. Edit, rename,
+  duplicate, delete, and export/import them as JSON.
+- **Storage**: Trees are kept in this browser (`localStorage`) and store
+  only node ids, so they follow later edits to the data; nodes deleted since
+  are reported as missing. A `tree=` link only works in the browser that has
+  the tree.
 
 ### Multi-View Explorer
 
@@ -68,8 +94,18 @@ The platform features a full CRUD interface for editing the technology tree, AI-
 ### AI-Powered Chat Interface
 
 - **Contextual Assistance**: Chat is proxied to the kg-service, where `qwen3.8:27b` (Ollama) answers with an agentic loop — it calls KG tools (entity resolution, concept expansion, paper dossiers, vector search over paper chunks, guarded read-only Cypher) and cites papers by id
+- **Talks about what you selected**: The chat's context follows the most
+  specific selection on screen — the tree being built, a guided pathway
+  (with its stages, bottleneck and current step), an open custom tree (with
+  your notes), or the whole topic tree. The connected-nodes view and the
+  search/category/role filters narrow it further. Selections are sent with
+  their prerequisite links. A chip above the input shows what the assistant
+  sees, with a switch back to the whole tree.
+- **One conversation per context**: The whole tree, each pathway, each
+  custom tree and the tree being built keep their own history (saved
+  locally; the 30 most recent scoped conversations are kept). A reply that
+  arrives after you switch context lands in the conversation it was asked in.
 - **Technology Queries**: Ask questions about specific technologies, milestones, or investment opportunities
-- **Persistent History**: Chat history saved locally for continuity
 
 ### Literature Overlay & Curation
 
@@ -168,7 +204,12 @@ src/
 │   ├── CustomNode.tsx           # Custom node rendering (with branch fold toggle)
 │   ├── AggregateNode.tsx        # One node standing for a whole group
 │   ├── GroupFrameNode.tsx       # Frame around an unfolded group
-│   ├── TreeComparison.tsx       # "Compare trees" dialog
+│   ├── TreeComparison.tsx       # "Compare trees" dialog (topics and custom trees)
+│   ├── AnimatedReactFlow.tsx    # React Flow plus animated relayouts
+│   ├── TreeBuilderPanel.tsx     # Floating card for building a custom tree
+│   ├── BoxSelection.tsx         # Shift+drag area pick while building
+│   ├── SaveTreeDialog.tsx       # Save a pathway/view as a custom tree
+│   ├── MyTreesDialog.tsx        # List and manage custom trees
 │   ├── techTreeNodeTypes.tsx    # Stable React Flow node types (context-driven)
 │   ├── NodeActions.tsx          # Node action buttons
 │   ├── Legend.tsx               # Graph legend
@@ -180,6 +221,8 @@ src/
 │   ├── useTechTree.ts           # Shared, de-duplicated tech tree fetch
 │   ├── useExplorerUrlState.ts   # Topic/view/focus/pathway/step in the URL
 │   ├── useCanvasWheel.ts        # Wheel zoom over canvas panels, smoothed notches
+│   ├── useCustomTrees.ts        # Shared store of custom trees (localStorage)
+│   ├── useTreeBuilder.ts        # Draft state of the tree being built
 │   └── usePathwayMode.ts        # Pathway subgraph and guide steps
 ├── lib/                # Utility libraries
 │   ├── types.ts        # TypeScript type definitions
@@ -189,6 +232,10 @@ src/
 │   ├── deploymentEstimate.ts # Shared scheduler estimate
 │   ├── treeProjection.ts # Aggregation, branch folding and tree summaries
 │   ├── canvasZoom.ts   # Size-based zoom-out limit and zoom detail levels
+│   ├── layoutTransition.ts # Plans and interpolates relayout animations
+│   ├── customTrees.ts  # Custom tree model, storage format, graph helpers
+│   ├── chatContext.ts  # Chat scope, request payload and context text
+│   ├── chatThreadStorage.ts # One stored conversation per chat context
 │   ├── elkjs.ts        # Graph layout engine (incl. frames for unfolded groups)
 │   ├── mongodb.ts      # MongoDB connection
 │   └── utils.ts        # Utility functions
@@ -197,8 +244,8 @@ src/
 ### State Management
 
 - **React Hooks**: Local component state management
-- **URL**: Topic, explorer view, focused node and guided pathway step
-- **Local Storage**: Persistent chat history, onboarding completion and last topic
+- **URL**: Topic, explorer view, focused node, guided pathway step and open custom tree
+- **Local Storage**: Chat conversations (one per context), custom trees, onboarding completion and last topic
 - **MongoDB**: Server-side persistent storage for all tech tree data
 
 ## Getting Started

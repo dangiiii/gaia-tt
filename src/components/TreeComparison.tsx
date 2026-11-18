@@ -10,10 +10,11 @@ import {
   ReactFlow,
   ReactFlowProvider,
 } from '@xyflow/react';
-import { ArrowRight, X } from 'lucide-react';
+import { ArrowLeftToLine, ArrowRight, Plus, X } from 'lucide-react';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 import { NODE_LABELS, TechTree, UiNode } from '@/lib/types';
 import { loadTechTree, peekTechTree } from '@/hooks/useTechTree';
+import { useCustomTrees } from '@/hooks/useCustomTrees';
 import {
   AGGREGATION_MODE_LABELS,
   AggregationMode,
@@ -21,6 +22,7 @@ import {
   projectTree,
   summarizeTree,
 } from '@/lib/treeProjection';
+import { CustomTree, resolveCustomTree, treeOverlap } from '@/lib/customTrees';
 import { layoutProjection, roleColor } from '@/lib/elkjs';
 import { nodeRolePluralLabel } from '@/lib/nodeRoles';
 import {
@@ -29,6 +31,16 @@ import {
   DialogPortal,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { TECH_TREE_NODE_TYPES } from './techTreeNodeTypes';
 import { TechTreeNodeActionsContext } from './techTreeNodeActions';
@@ -41,42 +53,55 @@ export const COMPARISON_MODES: ComparisonMode[] = [
   'role',
 ];
 
+/** A tree that can be a comparison column: a topic or a custom tree. */
+export type TreeRef =
+  | { kind: 'topic'; topic: TopicKey }
+  | { kind: 'custom'; id: string };
+
 const TOPIC_KEYS = Object.keys(TOPICS) as TopicKey[];
+/** Wider tables stop being readable side by side. */
+const MAX_COLUMNS = 4;
 /** One neutral hue: the TRL bars measure readiness, not a node role. */
 const TRL_BAR_COLOR = '#64748b';
 /** Tallest bar's share of the plot height; the rest is room for its label. */
 const TRL_PLOT_FILL = 0.82;
+
+const refKey = (ref: TreeRef) =>
+  ref.kind === 'topic' ? `topic:${ref.topic}` : `custom:${ref.id}`;
 
 type TreeState =
   | { status: 'loading' }
   | { status: 'ready'; tree: TechTree }
   | { status: 'error' };
 
-function useTechTrees(enabled: boolean): Record<TopicKey, TreeState> {
-  const [states, setStates] = useState(
-    () =>
-      Object.fromEntries(
-        TOPIC_KEYS.map((topic) => {
-          const tree = peekTechTree(topic);
-          return [topic, tree ? { status: 'ready', tree } : { status: 'loading' }];
-        }),
-      ) as Record<TopicKey, TreeState>,
+/** Loads the topic trees the columns need, once each. */
+function useTopicTrees(
+  topics: TopicKey[],
+  enabled: boolean,
+): Partial<Record<TopicKey, TreeState>> {
+  const [states, setStates] = useState<Partial<Record<TopicKey, TreeState>>>(() =>
+    Object.fromEntries(
+      TOPIC_KEYS.flatMap((topic) => {
+        const tree = peekTechTree(topic);
+        return tree ? [[topic, { status: 'ready', tree }]] : [];
+      }),
+    ),
   );
+  const wanted = topics.join(',');
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    for (const topic of TOPIC_KEYS) {
+    for (const topic of wanted.split(',').filter(Boolean) as TopicKey[]) {
       loadTechTree(topic).then(
         (tree) => {
-          if (!cancelled) {
-            setStates((current) =>
-              current[topic].status === 'ready' &&
-              (current[topic] as { tree: TechTree }).tree === tree
-                ? current
-                : { ...current, [topic]: { status: 'ready', tree } },
-            );
-          }
+          if (cancelled) return;
+          setStates((current) => {
+            const state = current[topic];
+            return state?.status === 'ready' && state.tree === tree
+              ? current
+              : { ...current, [topic]: { status: 'ready', tree } };
+          });
         },
         () => {
           if (!cancelled) {
@@ -88,9 +113,36 @@ function useTechTrees(enabled: boolean): Record<TopicKey, TreeState> {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [wanted, enabled]);
 
   return states;
+}
+
+interface Column {
+  ref: TreeRef;
+  key: string;
+  label: string;
+  /** "My tree · Nuclear Energy" for custom trees. */
+  detail: string | null;
+  topic: TopicKey;
+  state: TreeState;
+  custom: CustomTree | null;
+  isCurrent: boolean;
+}
+
+function defaultColumns(
+  currentTopic: TopicKey,
+  currentCustomTreeId: string | null,
+): TreeRef[] {
+  const topics = TOPIC_KEYS.map((topic): TreeRef => ({ kind: 'topic', topic }));
+  if (currentCustomTreeId) {
+    const current: TreeRef = { kind: 'custom', id: currentCustomTreeId };
+    return [current, ...topics].slice(0, MAX_COLUMNS);
+  }
+  return [
+    { kind: 'topic', topic: currentTopic },
+    ...topics.filter((ref) => ref.kind === 'topic' && ref.topic !== currentTopic),
+  ];
 }
 
 const percent = (value: number) => `${Math.round(value * 100)}%`;
@@ -99,57 +151,135 @@ interface TreeComparisonProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentTopic: TopicKey;
+  /** The custom tree on the canvas, if any. */
+  currentCustomTreeId?: string | null;
+  /** Columns to start with; null picks the current tree plus the topics. */
+  initialColumns?: TreeRef[] | null;
   initialMode: ComparisonMode;
   /** Opens a tree in the main view, aggregated the same way. */
   onOpenTopic: (topic: TopicKey, mode: ComparisonMode) => void;
+  onOpenCustomTree?: (tree: CustomTree, mode: ComparisonMode) => void;
 }
 
 /**
- * Every tech tree side by side, scaled down to aggregates: headline figures,
- * role mix and readiness on shared scales, then each tree's aggregated
- * structure.
+ * Tech trees and custom trees side by side, scaled down to aggregates:
+ * headline figures, overlap with a baseline, role mix and readiness on
+ * shared scales, then each tree's aggregated structure.
  */
 export function TreeComparison({
   open,
   onOpenChange,
   currentTopic,
+  currentCustomTreeId = null,
+  initialColumns = null,
   initialMode,
   onOpenTopic,
+  onOpenCustomTree,
 }: TreeComparisonProps) {
   const [mode, setMode] = useState<ComparisonMode>(initialMode);
+  const [refs, setRefs] = useState<TreeRef[]>(() =>
+    initialColumns ?? defaultColumns(currentTopic, currentCustomTreeId),
+  );
   useEffect(() => {
-    if (open) setMode(initialMode);
-  }, [open, initialMode]);
+    if (!open) return;
+    setMode(initialMode);
+    setRefs(initialColumns ?? defaultColumns(currentTopic, currentCustomTreeId));
+  }, [open, initialMode, initialColumns, currentTopic, currentCustomTreeId]);
 
-  const states = useTechTrees(open);
+  const customTrees = useCustomTrees();
+  const customById = useMemo(
+    () => new Map(customTrees.map((tree) => [tree.id, tree])),
+    [customTrees],
+  );
+  // A deleted custom tree drops out of the comparison.
+  const liveRefs = useMemo(
+    () => refs.filter((ref) => ref.kind === 'topic' || customById.has(ref.id)),
+    [refs, customById],
+  );
+  const topicOf = (ref: TreeRef): TopicKey =>
+    ref.kind === 'topic' ? ref.topic : customById.get(ref.id)!.topic;
+  const neededTopics = [...new Set(liveRefs.map(topicOf))];
+  const states = useTopicTrees(neededTopics, open);
+
+  const columns = useMemo<Column[]>(
+    () =>
+      liveRefs.map((ref) => {
+        const custom = ref.kind === 'custom' ? customById.get(ref.id)! : null;
+        const topic = custom ? custom.topic : (ref as { topic: TopicKey }).topic;
+        const topicState = states[topic] ?? { status: 'loading' };
+        const state: TreeState =
+          custom && topicState.status === 'ready'
+            ? { status: 'ready', tree: resolveCustomTree(topicState.tree, custom).tree }
+            : topicState;
+        return {
+          ref,
+          key: refKey(ref),
+          label: custom ? custom.name : TOPICS[topic].label,
+          detail: custom ? `My tree · ${TOPICS[topic].label}` : null,
+          topic,
+          state,
+          custom,
+          isCurrent: custom
+            ? custom.id === currentCustomTreeId
+            : !currentCustomTreeId && topic === currentTopic,
+        };
+      }),
+    [liveRefs, customById, states, currentCustomTreeId, currentTopic],
+  );
+
   const summaries = useMemo(
     () =>
-      Object.fromEntries(
-        TOPIC_KEYS.map((topic) => {
-          const state = states[topic];
-          return [
-            topic,
-            state.status === 'ready' && state.tree.nodes.length
-              ? summarizeTree(state.tree)
-              : null,
-          ];
-        }),
-      ) as Record<TopicKey, TreeSummary | null>,
-    [states],
+      new Map(
+        columns.map((column) => [
+          column.key,
+          column.state.status === 'ready' && column.state.tree.nodes.length
+            ? summarizeTree(column.state.tree)
+            : null,
+        ]),
+      ),
+    [columns],
   );
   // One y-scale for every TRL chart, so bar heights compare across trees.
   const maxTrlShare = Math.max(
     0.01,
-    ...TOPIC_KEYS.flatMap((topic) => {
-      const summary = summaries[topic];
-      const rated = summary
-        ? summary.nodeCount - summary.unratedCount
-        : 0;
+    ...columns.flatMap((column) => {
+      const summary = summaries.get(column.key);
+      const rated = summary ? summary.nodeCount - summary.unratedCount : 0;
       return summary && rated
         ? summary.trlHistogram.map((count) => count / rated)
         : [];
     }),
   );
+
+  const available = useMemo(() => {
+    const used = new Set(liveRefs.map(refKey));
+    return {
+      topics: TOPIC_KEYS.filter((topic) => !used.has(`topic:${topic}`)),
+      custom: customTrees.filter((tree) => !used.has(`custom:${tree.id}`)),
+    };
+  }, [liveRefs, customTrees]);
+
+  const addColumn = (value: string) => {
+    const ref: TreeRef = value.startsWith('custom:')
+      ? { kind: 'custom', id: value.slice('custom:'.length) }
+      : { kind: 'topic', topic: value.slice('topic:'.length) as TopicKey };
+    setRefs([...liveRefs, ref].slice(0, MAX_COLUMNS));
+  };
+  const removeColumn = (key: string) =>
+    setRefs(liveRefs.filter((ref) => refKey(ref) !== key));
+  const makeBaseline = (key: string) =>
+    setRefs([
+      ...liveRefs.filter((ref) => refKey(ref) === key),
+      ...liveRefs.filter((ref) => refKey(ref) !== key),
+    ]);
+
+  const openColumn = (column: Column) => {
+    if (column.custom) onOpenCustomTree?.(column.custom, mode);
+    else onOpenTopic(column.topic, mode);
+  };
+
+  const baseline = columns[0];
+  const tableMinWidth = 240 + columns.length * 220;
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -164,9 +294,10 @@ export function TreeComparison({
                   Compare trees
                 </DialogTitle>
                 <DialogDescription className="max-w-2xl text-sm text-gray-600">
-                  Each tree scaled down to aggregate nodes, with the same
-                  measures side by side. Figures cover the full dataset,
-                  before any filters.
+                  Tech trees and your own trees side by side, scaled down to
+                  aggregate nodes. The first column is the baseline the others
+                  are measured against. Figures cover each full tree, before
+                  any filters.
                 </DialogDescription>
               </div>
               <div className="flex items-center gap-3">
@@ -201,41 +332,137 @@ export function TreeComparison({
               </div>
             </header>
 
+            <div className="flex flex-wrap items-center gap-2 border-b border-gray-100 px-6 py-3">
+              <span className="text-xs font-medium text-gray-600">Comparing</span>
+              {columns.map((column, index) => (
+                <span
+                  key={column.key}
+                  className={`inline-flex items-center gap-1 rounded-full border py-0.5 pl-2.5 pr-1 text-xs font-medium ${
+                    index === 0
+                      ? 'border-gray-900 bg-gray-900 text-white'
+                      : 'border-gray-200 bg-white text-gray-800'
+                  }`}
+                >
+                  {index === 0 && <span className="text-[10px] uppercase tracking-wider opacity-80">Baseline ·</span>}
+                  <span className="max-w-[12rem] truncate">{column.label}</span>
+                  {columns.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeColumn(column.key)}
+                      className={`rounded-full p-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                        index === 0 ? 'hover:bg-white/20' : 'hover:bg-gray-100'
+                      }`}
+                      aria-label={`Stop comparing ${column.label}`}
+                    >
+                      <X className="h-3 w-3" aria-hidden />
+                    </button>
+                  )}
+                </span>
+              ))}
+              {(available.topics.length > 0 || available.custom.length > 0) && (
+                <Select value="" onValueChange={addColumn} disabled={columns.length >= MAX_COLUMNS}>
+                  <SelectTrigger
+                    className="h-7 w-auto gap-1 rounded-full border-dashed px-2.5 text-xs"
+                    aria-label="Add a tree to compare"
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden />
+                    <SelectValue
+                      placeholder={columns.length >= MAX_COLUMNS ? `Up to ${MAX_COLUMNS} trees` : 'Add tree'}
+                    />
+                  </SelectTrigger>
+                  <SelectContent className="z-[90]">
+                    {available.topics.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel>Tech trees</SelectLabel>
+                        {available.topics.map((topic) => (
+                          <SelectItem key={topic} value={`topic:${topic}`}>
+                            {TOPICS[topic].label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                    {available.topics.length > 0 && available.custom.length > 0 && (
+                      <SelectSeparator />
+                    )}
+                    {available.custom.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel>My trees</SelectLabel>
+                        {available.custom.map((tree) => (
+                          <SelectItem key={tree.id} value={`custom:${tree.id}`}>
+                            {tree.name}
+                            <span className="ml-1.5 text-xs text-gray-500">
+                              · {TOPICS[tree.topic].label}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
             <div className="flex-1 overflow-y-auto px-6 py-5">
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] table-fixed border-collapse text-sm">
+                <table
+                  className="w-full table-fixed border-collapse text-sm"
+                  style={{ minWidth: tableMinWidth }}
+                >
                   <caption className="sr-only">
-                    Headline figures for each tech tree
+                    Headline figures for each compared tree
                   </caption>
                   <thead>
                     <tr>
                       <th scope="col" className="w-48" />
-                      {TOPIC_KEYS.map((topic) => (
+                      {columns.map((column, index) => (
                         <th
-                          key={topic}
+                          key={column.key}
                           scope="col"
                           className="px-4 pb-3 text-left align-bottom font-normal"
                         >
-                          <div className="flex items-center gap-2">
-                            <span className="text-base font-semibold text-gray-900">
-                              {TOPICS[topic].label}
+                          {column.detail && (
+                            <span className="block text-[11px] font-medium uppercase tracking-wider text-blue-700">
+                              {column.detail}
                             </span>
-                            {topic === currentTopic && (
+                          )}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-base font-semibold text-gray-900">
+                              {column.label}
+                            </span>
+                            {index === 0 && columns.length > 1 && (
+                              <span className="rounded-full bg-gray-900 px-2 py-0.5 text-[11px] font-medium text-white">
+                                Baseline
+                              </span>
+                            )}
+                            {column.isCurrent && (
                               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
                                 Current
                               </span>
                             )}
                           </div>
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="h-auto px-0 py-1 text-xs"
-                            disabled={!summaries[topic]}
-                            onClick={() => onOpenTopic(topic, mode)}
-                          >
-                            Open aggregated
-                            <ArrowRight aria-hidden />
-                          </Button>
+                          <div className="flex flex-wrap items-center gap-x-3">
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto px-0 py-1 text-xs"
+                              disabled={!summaries.get(column.key)}
+                              onClick={() => openColumn(column)}
+                            >
+                              Open aggregated
+                              <ArrowRight aria-hidden />
+                            </Button>
+                            {index > 0 && (
+                              <Button
+                                variant="link"
+                                size="sm"
+                                className="h-auto px-0 py-1 text-xs text-gray-600"
+                                onClick={() => makeBaseline(column.key)}
+                              >
+                                <ArrowLeftToLine aria-hidden />
+                                Make baseline
+                              </Button>
+                            )}
+                          </div>
                         </th>
                       ))}
                     </tr>
@@ -244,35 +471,38 @@ export function TreeComparison({
                     <MetricRow
                       first
                       label="Nodes"
+                      columns={columns}
                       summaries={summaries}
-                      states={states}
                       value={(s) => s.nodeCount.toLocaleString()}
                     />
+                    {columns.length > 1 && baseline && (
+                      <OverlapRow columns={columns} baseline={baseline} />
+                    )}
                     <MetricRow
                       label="Links"
+                      columns={columns}
                       summaries={summaries}
-                      states={states}
                       value={(s) => s.edgeCount.toLocaleString()}
                     />
                     <MetricRow
                       label="Categories"
+                      columns={columns}
                       summaries={summaries}
-                      states={states}
                       value={(s) => String(s.categoryCount)}
                     />
                     <MetricRow
                       label="Longest prerequisite chain"
                       hint="Nodes on the longest path from a foundation to the node it unlocks"
+                      columns={columns}
                       summaries={summaries}
-                      states={states}
                       value={(s) =>
                         `${s.longestChain} node${s.longestChain === 1 ? '' : 's'}`
                       }
                     />
                     <MetricRow
                       label="Median TRL"
+                      columns={columns}
                       summaries={summaries}
-                      states={states}
                       value={(s) =>
                         s.medianTrl === null ? '—' : String(s.medianTrl)
                       }
@@ -280,8 +510,8 @@ export function TreeComparison({
                     <MetricRow
                       label="Mature (TRL 7–9)"
                       hint="Share of rated nodes demonstrated as a system or better"
+                      columns={columns}
                       summaries={summaries}
-                      states={states}
                       value={(s) =>
                         s.matureShare === null ? '—' : percent(s.matureShare)
                       }
@@ -293,15 +523,18 @@ export function TreeComparison({
                       >
                         Role mix
                       </th>
-                      {TOPIC_KEYS.map((topic) => (
-                        <td key={topic} className="px-4 py-3">
-                          {summaries[topic] ? (
-                            <RoleMix summary={summaries[topic]!} />
-                          ) : (
-                            <EmptyCell state={states[topic]} compact />
-                          )}
-                        </td>
-                      ))}
+                      {columns.map((column) => {
+                        const summary = summaries.get(column.key);
+                        return (
+                          <td key={column.key} className="px-4 py-3">
+                            {summary ? (
+                              <RoleMix summary={summary} />
+                            ) : (
+                              <EmptyCell state={column.state} compact />
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                     <tr className="border-t border-gray-100 align-top">
                       <th
@@ -314,18 +547,18 @@ export function TreeComparison({
                           every tree
                         </span>
                       </th>
-                      {TOPIC_KEYS.map((topic) => (
-                        <td key={topic} className="px-4 py-3">
-                          {summaries[topic] ? (
-                            <TrlDistribution
-                              summary={summaries[topic]!}
-                              maxShare={maxTrlShare}
-                            />
-                          ) : (
-                            <EmptyCell state={states[topic]} compact />
-                          )}
-                        </td>
-                      ))}
+                      {columns.map((column) => {
+                        const summary = summaries.get(column.key);
+                        return (
+                          <td key={column.key} className="px-4 py-3">
+                            {summary ? (
+                              <TrlDistribution summary={summary} maxShare={maxTrlShare} />
+                            ) : (
+                              <EmptyCell state={column.state} compact />
+                            )}
+                          </td>
+                        );
+                      })}
                     </tr>
                   </tbody>
                 </table>
@@ -338,30 +571,42 @@ export function TreeComparison({
                 Grouped by {AGGREGATION_MODE_LABELS[mode].toLowerCase()}. Edge
                 labels count the links each arrow stands for.
               </p>
-              <div className="mt-3 grid gap-4 lg:grid-cols-3">
-                {TOPIC_KEYS.map((topic) => {
-                  const state = states[topic];
-                  return (
-                    <section
-                      key={topic}
-                      aria-label={`${TOPICS[topic].label}, aggregated`}
-                      className="overflow-hidden rounded-xl border border-gray-200"
-                    >
-                      <div className="border-b border-gray-100 px-4 py-2 text-sm font-medium text-gray-800">
-                        {TOPICS[topic].label}
-                      </div>
-                      <div className="h-[380px]">
-                        {state.status === 'ready' && state.tree.nodes.length ? (
-                          <AggregatedPreview tree={state.tree} mode={mode} />
-                        ) : (
-                          <div className="flex h-full items-center justify-center p-6 text-center text-sm text-gray-500">
-                            <EmptyCell state={state} />
-                          </div>
-                        )}
-                      </div>
-                    </section>
-                  );
-                })}
+              <div
+                className={`mt-3 grid gap-4 ${
+                  columns.length >= 4
+                    ? 'lg:grid-cols-4'
+                    : columns.length === 3
+                      ? 'lg:grid-cols-3'
+                      : columns.length === 2
+                        ? 'lg:grid-cols-2'
+                        : ''
+                }`}
+              >
+                {columns.map((column) => (
+                  <section
+                    key={column.key}
+                    aria-label={`${column.label}, aggregated`}
+                    className="overflow-hidden rounded-xl border border-gray-200"
+                  >
+                    <div className="border-b border-gray-100 px-4 py-2 text-sm font-medium text-gray-800">
+                      {column.label}
+                      {column.detail && (
+                        <span className="ml-1.5 text-xs font-normal text-gray-500">
+                          {column.detail}
+                        </span>
+                      )}
+                    </div>
+                    <div className="h-[380px]">
+                      {column.state.status === 'ready' && column.state.tree.nodes.length ? (
+                        <AggregatedPreview tree={column.state.tree} mode={mode} />
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-gray-500">
+                          <EmptyCell state={column.state} />
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                ))}
               </div>
             </div>
           </TechTreeNodeActionsContext.Provider>
@@ -388,7 +633,7 @@ function EmptyCell({
         ? 'Loading…'
         : state.status === 'error'
           ? 'Could not load this tree'
-          : 'No nodes in this database'}
+          : 'No nodes in this tree'}
     </span>
   );
 }
@@ -396,16 +641,16 @@ function EmptyCell({
 function MetricRow({
   label,
   hint,
+  columns,
   summaries,
-  states,
   value,
   first = false,
 }: {
   label: string;
   hint?: string;
   first?: boolean;
-  summaries: Record<TopicKey, TreeSummary | null>;
-  states: Record<TopicKey, TreeState>;
+  columns: Column[];
+  summaries: Map<string, TreeSummary | null>;
   value: (summary: TreeSummary) => string;
 }) {
   return (
@@ -417,15 +662,90 @@ function MetricRow({
       >
         {label}
       </th>
-      {TOPIC_KEYS.map((topic) => (
-        <td key={topic} className="px-4 py-2.5 font-semibold text-gray-900">
-          {summaries[topic] ? (
-            value(summaries[topic]!)
-          ) : (
-            <EmptyCell state={states[topic]} compact={!first} />
-          )}
-        </td>
-      ))}
+      {columns.map((column) => {
+        const summary = summaries.get(column.key);
+        return (
+          <td key={column.key} className="px-4 py-2.5 font-semibold text-gray-900">
+            {summary ? value(summary) : <EmptyCell state={column.state} compact={!first} />}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+/**
+ * How much of each tree the baseline already covers. Only trees drawn from
+ * the same topic share node ids, so other topics are marked as such.
+ */
+function OverlapRow({ columns, baseline }: { columns: Column[]; baseline: Column }) {
+  const baselineIds =
+    baseline.state.status === 'ready'
+      ? baseline.state.tree.nodes.map((node) => node.id)
+      : null;
+  return (
+    <tr className="border-t border-gray-100 align-top">
+      <th
+        scope="row"
+        className="py-2.5 pr-4 text-left font-medium text-gray-600"
+        title="Nodes this tree shares with the baseline, and nodes only it has"
+      >
+        Overlap with baseline
+      </th>
+      {columns.map((column, index) => {
+        if (index === 0) {
+          return (
+            <td key={column.key} className="px-4 py-2.5 text-sm text-gray-500">
+              Baseline
+            </td>
+          );
+        }
+        if (column.topic !== baseline.topic) {
+          return (
+            <td key={column.key} className="px-4 py-2.5 text-sm text-gray-500">
+              Different topic, no shared nodes
+            </td>
+          );
+        }
+        if (column.state.status !== 'ready' || !baselineIds) {
+          return (
+            <td key={column.key} className="px-4 py-2.5">
+              <EmptyCell state={column.state} compact />
+            </td>
+          );
+        }
+        const tree = column.state.tree;
+        const overlap = treeOverlap(baselineIds, tree.nodes.map((node) => node.id));
+        const total = Math.max(tree.nodes.length, 1);
+        const labelOf = new Map(tree.nodes.map((node) => [node.id, node.data.label]));
+        return (
+          <td key={column.key} className="px-4 py-2.5">
+            <p className="font-semibold text-gray-900">
+              {overlap.shared.length} shared{' '}
+              <span className="font-normal text-gray-500">
+                ({percent(overlap.shared.length / total)})
+              </span>
+            </p>
+            <p className="text-xs text-gray-600">
+              {overlap.onlyB.length} only here · {overlap.onlyA.length} only in baseline
+            </p>
+            {overlap.onlyB.length > 0 && (
+              <details className="mt-1 text-xs text-gray-600">
+                <summary className="cursor-pointer select-none font-medium text-gray-700 hover:text-gray-900">
+                  Nodes only here
+                </summary>
+                <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto pl-3">
+                  {overlap.onlyB.map((id) => (
+                    <li key={id} className="list-disc">
+                      {labelOf.get(id) ?? id}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </td>
+        );
+      })}
     </tr>
   );
 }

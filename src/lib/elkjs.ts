@@ -66,6 +66,32 @@ export interface LayoutResult {
   bounds: Bounds | null;
   /** Top-left of every node in flow coordinates (children are nested). */
   absolutePositions: Map<string, XYPosition>;
+  /** Box of every node (frames included) in flow coordinates. */
+  rects: Map<string, Bounds>;
+}
+
+/**
+ * Moves a whole layout by `delta`. Only top-level nodes move; frame members
+ * are positioned relative to their frame and follow it.
+ */
+export function shiftLayout(result: LayoutResult, delta: XYPosition): LayoutResult {
+  if (!delta.x && !delta.y) return result;
+  const move = <T extends XYPosition>(point: T): T => ({
+    ...point,
+    x: point.x + delta.x,
+    y: point.y + delta.y,
+  });
+  return {
+    ...result,
+    layoutedNodes: result.layoutedNodes.map((node) =>
+      node.parentId ? node : { ...node, position: move(node.position) },
+    ),
+    bounds: result.bounds ? move(result.bounds) : null,
+    absolutePositions: new Map(
+      [...result.absolutePositions].map(([id, point]) => [id, move(point)]),
+    ),
+    rects: new Map([...result.rects].map(([id, rect]) => [id, move(rect)])),
+  };
 }
 
 /**
@@ -268,18 +294,28 @@ export async function layoutProjection(
 
   const placed = new Map<string, { node: ElkNode; parentId: string | null }>();
   const absolutePositions = new Map<string, XYPosition>();
-  const rects: Bounds[] = [];
+  const rects = new Map<string, Bounds>();
   for (const child of layouted.children ?? []) {
     const x = child.x ?? 0;
     const y = child.y ?? 0;
     placed.set(child.id, { node: child, parentId: null });
     absolutePositions.set(child.id, { x, y });
-    rects.push({ x, y, width: child.width ?? 0, height: child.height ?? 0 });
+    rects.set(child.id, {
+      x,
+      y,
+      width: child.width ?? 0,
+      height: child.height ?? 0,
+    });
     for (const grandchild of child.children ?? []) {
+      const gx = x + (grandchild.x ?? 0);
+      const gy = y + (grandchild.y ?? 0);
       placed.set(grandchild.id, { node: grandchild, parentId: child.id });
-      absolutePositions.set(grandchild.id, {
-        x: x + (grandchild.x ?? 0),
-        y: y + (grandchild.y ?? 0),
+      absolutePositions.set(grandchild.id, { x: gx, y: gy });
+      rects.set(grandchild.id, {
+        x: gx,
+        y: gy,
+        width: grandchild.width ?? 0,
+        height: grandchild.height ?? 0,
       });
     }
   }
@@ -327,8 +363,12 @@ export async function layoutProjection(
         data: { weight: edge.weight } satisfies EdgeWeightData,
       }),
     ),
-    bounds: boundsOf(rects),
+    // Frames contain their members, so top-level boxes span everything.
+    bounds: boundsOf(
+      (layouted.children ?? []).map((child) => rects.get(child.id)!),
+    ),
     absolutePositions,
+    rects,
   };
 }
 
@@ -349,13 +389,25 @@ export function stackedShadow(color: string): string {
 /** Ring drawn around highlighted nodes. */
 export const HIGHLIGHT_RING = '0 0 0 2px #f97316';
 
-/** Box shadow for a node: its stack (if it hides others) plus any ring. */
-export function nodeShadow(node: UiNode, highlighted: boolean): string {
+/** Ring around nodes in the custom tree being built. */
+export const DRAFT_RING = '0 0 0 3px #2563eb';
+/** Ring around nodes under a Shift+drag selection box. */
+export const BOX_PREVIEW_RING = '0 0 0 3px #93c5fd';
+
+/**
+ * Box shadow for a node: its stack (if it hides others) plus any ring.
+ * `ring` replaces the highlight ring (builder states win).
+ */
+export function nodeShadow(
+  node: UiNode,
+  highlighted: boolean,
+  ring: string | null = null,
+): string {
   const stacked =
     node.type === 'aggregate' ||
     ((node.data.fold as NodeFoldState | undefined)?.folded ?? 0) > 0;
   const layers = [
-    highlighted ? HIGHLIGHT_RING : null,
+    ring ?? (highlighted ? HIGHLIGHT_RING : null),
     stacked ? stackedShadow(roleColor(node.data.nodeLabel)) : null,
   ].filter(Boolean);
   return layers.length ? layers.join(', ') : 'none';

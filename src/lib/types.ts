@@ -237,6 +237,8 @@ export interface ChatMessage {
   /** KG tool calls the agent ran to produce this answer (e.g. "search_chunks(...)"). */
   toolsUsed?: string[];
   timestamp: number;
+  /** What the assistant was shown when this was asked, if narrowed. */
+  context?: { label: string };
 }
 
 export interface ChatHistory {

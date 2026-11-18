@@ -18,6 +18,8 @@ import { isReactorNode } from '@/lib/reactorEntities';
 import { useTechTree } from '@/hooks/useTechTree';
 import { useCompanyView } from '@/hooks/useCompanyView';
 import { useExplorerUrlState } from '@/hooks/useExplorerUrlState';
+import { useCustomTrees } from '@/hooks/useCustomTrees';
+import { CustomTree } from '@/lib/customTrees';
 import TechTree from './TechTree';
 import { CompanyExplorer } from './CompanyExplorer';
 import { WorldExplorer } from './WorldExplorer';
@@ -60,8 +62,16 @@ function ExplorerWorkspaceContent({
   initialOnboarding,
 }: ExplorerWorkspaceContentProps) {
   const { urlState, updateUrl } = useExplorerUrlState();
+  const customTrees = useCustomTrees();
+  // A custom tree belongs to one topic, which wins over the URL's.
+  const customTree = urlState.tree
+    ? customTrees.find((tree) => tree.id === urlState.tree)
+    : undefined;
   const topic: TopicKey =
-    urlState.topic ?? initialOnboarding.lastTopic ?? DEFAULT_TOPIC.id;
+    customTree?.topic ??
+    urlState.topic ??
+    initialOnboarding.lastTopic ??
+    DEFAULT_TOPIC.id;
   const viewMode = urlState.view;
 
   const [companyDataRequested, setCompanyDataRequested] = useState(
@@ -156,8 +166,29 @@ function ExplorerWorkspaceContent({
       focus: null,
       pathway: technologyId,
       step: 0,
+      tree: null,
     });
   };
+
+  const handleOpenCustomTree = useCallback(
+    (tree: CustomTree) => {
+      setSelection(undefined);
+      updateUrl({
+        topic: tree.topic,
+        view: 'technology',
+        tree: tree.id,
+        focus: null,
+        pathway: null,
+        step: null,
+      });
+    },
+    [updateUrl],
+  );
+
+  const handleCloseCustomTree = useCallback(
+    () => updateUrl({ tree: null }),
+    [updateUrl],
+  );
 
   const handlePathwayStepChange = useCallback(
     (step: number) => updateUrl({ step }),
@@ -183,7 +214,7 @@ function ExplorerWorkspaceContent({
   const handleTopicChange = (nextTopic: TopicKey) => {
     setSelection(undefined);
     setCompanyFocusNodeId(null);
-    updateUrl({ topic: nextTopic, focus: null, pathway: null, step: null });
+    updateUrl({ topic: nextTopic, focus: null, pathway: null, step: null, tree: null });
   };
 
   const handleViewModeChange = (nextView: ExplorerViewMode) => {
@@ -201,7 +232,8 @@ function ExplorerWorkspaceContent({
     const node: UiNode = { ...dataNode, position: { x: 0, y: 0 } };
     setSelection({ kind: 'technology', node });
     setFocusRequestKey((current) => current + 1);
-    updateUrl({ view: 'technology', focus: nodeId, pathway: null, step: null });
+    // A custom tree may not hold the node; show it in the whole tree.
+    updateUrl({ view: 'technology', focus: nodeId, pathway: null, step: null, tree: null });
   };
 
   const showCompany = (company: CompanySummary) => {
@@ -296,6 +328,9 @@ function ExplorerWorkspaceContent({
             onPathwayStepChange={handlePathwayStepChange}
             onExitPathway={handleExitPathway}
             onChooseTechnology={openTechnologyPicker}
+            customTreeId={urlState.tree}
+            onOpenCustomTree={handleOpenCustomTree}
+            onCloseCustomTree={handleCloseCustomTree}
           />
         </ReactFlowProvider>
       </div>

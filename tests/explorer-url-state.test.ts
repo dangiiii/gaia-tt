@@ -17,6 +17,7 @@ test('parses valid params and falls back to defaults for invalid ones', () => {
     step: 2,
     panel: null,
     tech: null,
+    tree: null,
   });
   assert.deepEqual(parse('topic=solar&view=map&step=-1'), {
     topic: null,
@@ -26,6 +27,7 @@ test('parses valid params and falls back to defaults for invalid ones', () => {
     step: 0,
     panel: null,
     tech: null,
+    tree: null,
   });
 });
 
@@ -47,6 +49,17 @@ test('patch sets, removes and omits default values', () => {
   const cleared = applyExplorerPatch(next, { pathway: null });
   assert.equal(cleared.toString(), 'topic=nuclear');
   assert.equal(start.toString(), 'topic=nuclear&focus=a&view=company');
+});
+
+test('a custom tree id round-trips and can be cleared', () => {
+  assert.equal(parse('topic=nuclear&tree=ct_abc').tree, 'ct_abc');
+  assert.equal(parse('tree=').tree, null);
+  const opened = applyExplorerPatch(new URLSearchParams('topic=nuclear&pathway=p'), {
+    tree: 'ct_abc',
+    pathway: null,
+  });
+  assert.equal(opened.toString(), 'topic=nuclear&tree=ct_abc');
+  assert.equal(applyExplorerPatch(opened, { tree: null }).toString(), 'topic=nuclear');
 });
 
 test('step 0 is omitted from the URL', () => {

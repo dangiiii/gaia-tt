@@ -19,6 +19,8 @@ export interface ExplorerUrlState {
   panel: ExplorerPanel | null;
   /** Company/world filter: only companies mapped to this technology id. */
   tech: string | null;
+  /** Custom tree (saved in this browser) shown in the technology view. */
+  tree: string | null;
 }
 
 /** `undefined` leaves a param untouched; `null` removes it. */
@@ -30,6 +32,7 @@ export interface ExplorerUrlPatch {
   step?: number | null;
   panel?: ExplorerPanel | null;
   tech?: string | null;
+  tree?: string | null;
 }
 
 const DEFAULT_VIEW: ExplorerViewMode = 'technology';
@@ -66,6 +69,7 @@ export function parseExplorerParams(
     step: pathway && Number.isFinite(step) && step > 0 ? step : 0,
     panel: isPanel(panel) && panel !== DEFAULT_PANEL ? panel : null,
     tech: params.get('tech') || null,
+    tree: params.get('tree') || null,
   };
 }
 
@@ -95,6 +99,7 @@ export function applyExplorerPatch(
     set('panel', patch.panel === null || patch.panel === DEFAULT_PANEL ? null : patch.panel);
   }
   set('tech', patch.tech);
+  set('tree', patch.tree);
 
   return next;
 }
