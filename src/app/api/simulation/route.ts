@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
-import { runSimulation } from '@/lib/simulation';
+import { runSimulation, SimulationTechTree } from '@/lib/simulation';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 
 export async function GET(request: NextRequest) {
@@ -44,10 +44,18 @@ export async function GET(request: NextRequest) {
     // Prepare tech tree structure
     const techTree = {
       graph: {
-        nodes: nodes.map(({ _id, ...rest }) => rest),
-        edges: edges.map(({ _id, ...rest }) => rest),
+        nodes: nodes.map((node) =>
+          Object.fromEntries(
+            Object.entries(node).filter(([key]) => key !== '_id'),
+          ),
+        ),
+        edges: edges.map((edge) =>
+          Object.fromEntries(
+            Object.entries(edge).filter(([key]) => key !== '_id'),
+          ),
+        ),
       },
-    };
+    } as unknown as SimulationTechTree;
 
     console.log('📊 Tech tree loaded:', {
       topic: topicConfig.label,

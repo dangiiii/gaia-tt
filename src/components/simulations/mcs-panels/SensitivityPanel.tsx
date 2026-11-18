@@ -39,7 +39,7 @@ export const SensitivityPanel: React.FC<Props> = ({ sensitivity, labelToId, onNo
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-500">
-        Spearman rank correlation (ρ) between each uncertainty input and a node's completion
+        Spearman rank correlation (ρ) between each uncertainty input and a node&apos;s completion
         year. A higher absolute value means that input drives more of the timing variance.
         Positive ρ = later completion when the input is larger.
       </p>

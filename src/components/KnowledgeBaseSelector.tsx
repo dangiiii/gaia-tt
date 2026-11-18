@@ -2,10 +2,14 @@
 
 import React from 'react';
 import { TopicKey, TOPICS } from '@/lib/topicConfig';
+import { CustomTree } from '@/lib/customTrees';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -14,12 +18,38 @@ import { Database } from 'lucide-react';
 interface KnowledgeBaseSelectorProps {
   topic: TopicKey;
   onTopicChange: (value: TopicKey) => void;
+  /** Saved custom trees, offered next to the topics (technology view). */
+  customTrees?: CustomTree[];
+  activeCustomTreeId?: string | null;
+  onOpenCustomTree?: (tree: CustomTree) => void;
 }
+
+const TREE_VALUE_PREFIX = 'tree:';
 
 export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
   topic,
   onTopicChange,
+  customTrees = [],
+  activeCustomTreeId = null,
+  onOpenCustomTree,
 }) => {
+  const showTrees = !!onOpenCustomTree && customTrees.length > 0;
+  const activeTree = activeCustomTreeId
+    ? customTrees.find((tree) => tree.id === activeCustomTreeId)
+    : undefined;
+  const value = activeTree ? `${TREE_VALUE_PREFIX}${activeTree.id}` : topic;
+
+  const handleChange = (next: string) => {
+    if (next.startsWith(TREE_VALUE_PREFIX)) {
+      const tree = customTrees.find(
+        (candidate) => candidate.id === next.slice(TREE_VALUE_PREFIX.length),
+      );
+      if (tree) onOpenCustomTree?.(tree);
+      return;
+    }
+    onTopicChange(next as TopicKey);
+  };
+
   return (
     <div className="absolute top-6 left-4 z-10">
       <div className="bg-white border-2 border-gray-300 rounded-xl shadow-lg p-4 backdrop-blur-sm bg-opacity-90 w-fit">
@@ -31,20 +61,43 @@ export const KnowledgeBaseSelector: React.FC<KnowledgeBaseSelectorProps> = ({
             SELECT TECH TREE
           </h3>
         </div>
-        <Select value={topic} onValueChange={(value) => onTopicChange(value as TopicKey)}>
-          <SelectTrigger className="w-full h-10 bg-white border-gray-300 hover:border-gray-500 focus:ring-2 focus:ring-gray-400 transition-all shadow-sm font-medium">
+        <Select value={value} onValueChange={handleChange}>
+          <SelectTrigger className="w-full max-w-[16rem] h-10 bg-white border-gray-300 hover:border-gray-500 focus:ring-2 focus:ring-gray-400 transition-all shadow-sm font-medium">
             <SelectValue placeholder="Select tech tree" />
           </SelectTrigger>
           <SelectContent>
-            {Object.values(TOPICS).map((topicItem) => (
-              <SelectItem 
-                key={topicItem.id} 
-                value={topicItem.id}
-                className="font-medium hover:bg-gray-100 cursor-pointer"
-              >
-                {topicItem.label}
-              </SelectItem>
-            ))}
+            <SelectGroup>
+              {showTrees && <SelectLabel>Tech trees</SelectLabel>}
+              {Object.values(TOPICS).map((topicItem) => (
+                <SelectItem
+                  key={topicItem.id}
+                  value={topicItem.id}
+                  className="font-medium hover:bg-gray-100 cursor-pointer"
+                >
+                  {topicItem.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+            {showTrees && (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel>My trees</SelectLabel>
+                  {customTrees.map((tree) => (
+                    <SelectItem
+                      key={tree.id}
+                      value={`${TREE_VALUE_PREFIX}${tree.id}`}
+                      className="cursor-pointer hover:bg-gray-100"
+                    >
+                      {tree.name}
+                      <span className="ml-1.5 text-xs text-gray-500">
+                        · {TOPICS[tree.topic].label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </>
+            )}
           </SelectContent>
         </Select>
       </div>

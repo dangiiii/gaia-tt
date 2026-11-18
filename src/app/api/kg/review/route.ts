@@ -2,6 +2,23 @@ import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 import { TOPICS, TopicKey } from '@/lib/topicConfig';
 import { experimentKeys, PAPER_PART_SCOPE } from '@/lib/kgKeys';
+import { KgEntity, KgExperiment } from '@/lib/types';
+
+interface ReviewEntity extends KgEntity {
+  verification?: {
+    reason?: string | null;
+    keep?: boolean;
+  };
+}
+
+interface ReviewPart {
+  partId: string;
+  label: string;
+  status: 'accepted' | 'rejected';
+  curated: boolean;
+  curatedAt: unknown;
+  votes: { up: number; down: number };
+}
 
 // GET /api/kg/review?topic=... — every enriched node with its accepted and
 // rejected entities, with human curations (kg_curations) applied on top.
@@ -47,7 +64,11 @@ export async function GET(request: NextRequest) {
     // Paper parts: each referenced paper's experiments, keyed like /api/kg/paper.
     const paperIds = new Set<string>();
     for (const doc of docs) {
-      for (const e of [...(doc.entities ?? []), ...(doc.meta?.rejected ?? [])]) {
+      const entities = [
+        ...(doc.entities ?? []),
+        ...(doc.meta?.rejected ?? []),
+      ] as ReviewEntity[];
+      for (const e of entities) {
         if (e.kind === 'paper' && e.paper?.paperId) paperIds.add(e.paper.paperId);
       }
     }
@@ -58,13 +79,14 @@ export async function GET(request: NextRequest) {
         { projection: { _id: 0, paperId: 1, 'experiments.name': 1, 'experiments.device': 1 } },
       )
       .toArray();
-    const partsByPaper = new Map<string, any[]>();
+    const partsByPaper = new Map<string, ReviewPart[]>();
     for (const d of dossiers) {
-      const exps = d.experiments ?? [];
-      const keys = experimentKeys(d.paperId, exps);
+      const exps = (d.experiments ?? []) as KgExperiment[];
+      const paperId = String(d.paperId);
+      const keys = experimentKeys(paperId, exps);
       partsByPaper.set(
-        d.paperId,
-        exps.map((e: any, i: number) => {
+        paperId,
+        exps.map((e, i) => {
           const c = verdicts.get(`${PAPER_PART_SCOPE}::${keys[i]}`);
           return {
             partId: keys[i],
@@ -77,12 +99,16 @@ export async function GET(request: NextRequest) {
         }),
       );
     }
-    const partsFor = (e: any) =>
-      e.kind === 'paper' ? partsByPaper.get(e.paper?.paperId) ?? [] : [];
+    const partsFor = (e: ReviewEntity) => {
+      const paperId = e.paper?.paperId;
+      return e.kind === 'paper' && paperId
+        ? partsByPaper.get(paperId) ?? []
+        : [];
+    };
 
     const nodes = docs.map((doc) => {
-      const items: any[] = [];
-      for (const e of doc.entities ?? []) {
+      const items: Array<Record<string, unknown>> = [];
+      for (const e of (doc.entities ?? []) as ReviewEntity[]) {
         const c = verdicts.get(`${doc.techTreeNodeId}::${e.id}`);
         items.push({
           ...toItem(e),
@@ -93,7 +119,7 @@ export async function GET(request: NextRequest) {
           parts: partsFor(e),
         });
       }
-      for (const e of doc.meta?.rejected ?? []) {
+      for (const e of (doc.meta?.rejected ?? []) as ReviewEntity[]) {
         const c = verdicts.get(`${doc.techTreeNodeId}::${e.id}`);
         items.push({
           ...toItem(e),
@@ -114,7 +140,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-function toItem(e: any) {
+function toItem(e: ReviewEntity) {
   return {
     entityId: e.id,
     kind: e.kind,

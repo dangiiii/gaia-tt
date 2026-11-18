@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { LABEL_COLORS, UiNode, CompanyInfo } from '@/lib/types';
 import { TopicKey } from '@/lib/topicConfig';
+import { nodeRoleLabel } from '@/lib/nodeRoles';
 import { Manual } from './Manual';
 import CompanyDetails from './CompanyDetails';
+import { SmrNodeDetails } from './SmrNodeDetails';
 import {
   Accordion,
   AccordionContent,
@@ -26,7 +28,15 @@ type NodeDetailsProps = {
   topic: TopicKey;
   activeSubView: NodeDetailsSubView;
   onSubViewChange: (v: NodeDetailsSubView) => void;
+  onSelectNode?: (nodeId: string) => void;
+  onChooseTechnology?: () => void;
 };
+
+interface InfactAnalysis {
+  probability?: string | number;
+  uncertainty?: string | number;
+  interpretation?: string;
+}
 
 const formatTextWithBreaks = (text: string): string => {
   const sentences = text.split(/(?<=[.!?])\s+/);
@@ -48,7 +58,14 @@ const getProbabilityColor = (probabilityText: string): string => {
   return 'bg-green-600';
 };
 
-const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: NodeDetailsProps) => {
+const NodeDetails = ({
+  selectedNode,
+  topic,
+  activeSubView,
+  onSubViewChange,
+  onSelectNode,
+  onChooseTechnology,
+}: NodeDetailsProps) => {
   const [showInfactModal, setShowInfactModal] = useState(false);
   const [companies, setCompanies] = useState<CompanyInfo[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(false);
@@ -66,11 +83,13 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
       .then((data) => setCompanies(data.companies ?? []))
       .catch(() => {})
       .finally(() => setCompaniesLoading(false));
-  }, [activeSubView, selectedNode?.id, topic]);
+  }, [activeSubView, selectedNode, topic]);
 
-  if (!selectedNode) return <Manual />;
+  if (!selectedNode) return <Manual onChooseTechnology={onChooseTechnology} />;
 
-  const infactAnalysis = selectedNode.data?.infact_analysis as any;
+  const infactAnalysis = selectedNode.data?.infact_analysis as
+    | InfactAnalysis
+    | undefined;
   const infactStatus = selectedNode.data?.infact_status as string;
   let infactHtmlContent = selectedNode.data?.infact_analysis_html_content as string;
 
@@ -137,7 +156,7 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
           <DialogTitle className="sr-only">
             {modalCompany?.canonical_name ?? 'Company Details'}
           </DialogTitle>
-          {modalCompany && <CompanyDetails company={modalCompany} />}
+          {modalCompany && <CompanyDetails company={modalCompany} topic={topic} />}
         </DialogContent>
       </Dialog>
 
@@ -148,7 +167,7 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
             variant="secondary"
             className={`bg-${LABEL_COLORS[selectedNode.data.nodeLabel]}`}
           >
-            {selectedNode.data.nodeLabel}
+            {nodeRoleLabel(selectedNode.data.nodeLabel)}
           </Badge>
         </CardHeader>
 
@@ -165,6 +184,11 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
 
           {/* Node Info sub-view */}
           <TabsContent value="info" className="flex-1 overflow-auto mt-0">
+            {selectedNode.data.smr ? (
+              <CardContent className="pt-4">
+                <SmrNodeDetails nodeId={selectedNode.id} topic={topic} onSelectNode={onSelectNode} />
+              </CardContent>
+            ) : (
             <CardContent className="space-y-4 pt-4">
               {typeof selectedNode.data.trl_current === 'string' && (
                 <div className="space-y-2 pb-2 border-b-2">
@@ -265,6 +289,7 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
                 </div>
               )}
             </CardContent>
+            )}
           </TabsContent>
 
           {/* Associated Companies sub-view */}
@@ -281,13 +306,28 @@ const NodeDetails = ({ selectedNode, topic, activeSubView, onSubViewChange }: No
                     {companies.map((company) => (
                       <AccordionItem key={company.id} value={company.id}>
                         <AccordionTrigger className="text-sm text-left">
-                          <span className="flex items-center gap-2">
+                          <span className="flex flex-wrap items-center gap-2">
                             {company.canonical_name}
                             {company.is_primary && (
                               <Badge className="bg-yellow-400 text-yellow-900 text-[10px] px-1 py-0">
                                 Primary
                               </Badge>
                             )}
+                            {company.relation_method && (
+                              <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                                {company.relation_method}
+                              </Badge>
+                            )}
+                            {Array.isArray(company.relation_roles) &&
+                              (company.relation_roles as string[]).map((role) => (
+                                <Badge
+                                  key={role}
+                                  variant="outline"
+                                  className="text-[10px] px-1 py-0"
+                                >
+                                  {role.replace(/_/g, ' ')}
+                                </Badge>
+                              ))}
                           </span>
                         </AccordionTrigger>
                         <AccordionContent>

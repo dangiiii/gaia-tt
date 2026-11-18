@@ -1,7 +1,14 @@
 'use client';
 
-import React from 'react';
-import { CompanyInfo } from '@/lib/types';
+import React, { useMemo } from 'react';
+import {
+  CompanyInfo,
+  CompanyTechnologyMapping,
+  TechTree,
+} from '@/lib/types';
+import { TopicKey } from '@/lib/topicConfig';
+import { topicImageUrl } from '@/lib/smrImages';
+import { designsForCompany } from '@/lib/reactorEntities';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -13,6 +20,11 @@ import {
 
 interface CompanyDetailsProps {
   company: CompanyInfo;
+  /** Needed to resolve `logo_image_id` against the topic's image store. */
+  topic?: TopicKey;
+  mappings?: CompanyTechnologyMapping[];
+  techTree?: TechTree | null;
+  onSelectDesign?: (nodeId: string) => void;
 }
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -76,12 +88,60 @@ function RiskBlock({
   );
 }
 
-const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
+function MetricCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <div className="mt-1 text-sm font-semibold text-slate-900">{value}</div>
+    </div>
+  );
+}
+
+const CompanyDetails: React.FC<CompanyDetailsProps> = ({
+  company,
+  topic,
+  mappings = [],
+  techTree = null,
+  onSelectDesign,
+}) => {
+  const logoId = typeof company.logo_image_id === 'string' ? company.logo_image_id : null;
+  const extraNodeIds = useMemo(() => {
+    const fromDevelops = Array.isArray(company.develops)
+      ? (company.develops as unknown[]).filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [];
+    const fromAll = Array.isArray(company.tech_tree_all_nodes)
+      ? company.tech_tree_all_nodes
+      : [];
+    return [...fromDevelops, ...fromAll];
+  }, [company.develops, company.tech_tree_all_nodes]);
+  const designLinks = useMemo(
+    () => designsForCompany(company.id, mappings, techTree, extraNodeIds),
+    [company.id, mappings, techTree, extraNodeIds],
+  );
   return (
     <div className="p-4 flex flex-col h-full">
       <Card className="flex flex-col h-full">
         <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4 gap-4 border-b-2 mb-4">
-          <div>
+          {logoId && topic && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={topicImageUrl(topic, logoId)}
+              alt={`${company.canonical_name} logo`}
+              className="h-12 w-12 flex-shrink-0 rounded border bg-white object-contain p-0.5"
+              loading="lazy"
+            />
+          )}
+          <div className="flex-1">
             <CardTitle className="text-lg font-bold leading-tight">
               {company.canonical_name}
             </CardTitle>
@@ -106,12 +166,53 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
             </div>
           )}
 
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            <MetricCard
+              label="Headquarters"
+              value={
+                company.linkedin_headquarters ??
+                company.country_iso ??
+                'Not available'
+              }
+            />
+            <MetricCard
+              label="Readiness"
+              value={
+                company.trl_level != null
+                  ? `TRL ${company.trl_level}${
+                      company.trl_band ? ` · ${company.trl_band}` : ''
+                    }`
+                  : 'Not available'
+              }
+            />
+            <MetricCard
+              label="Funding"
+              value={
+                company.funding_total_usd != null
+                  ? `$${(company.funding_total_usd / 1_000_000).toFixed(1)}M`
+                  : company.vc_funding_stage ?? 'Not available'
+              }
+            />
+            <MetricCard
+              label="Geopolitical risk"
+              value={
+                company.geopolitical_risk_label ??
+                company.geopolitical_risk_score ??
+                'Not available'
+              }
+            />
+          </div>
+
           {company.description && (
             <div className="text-sm text-gray-700 italic border-l-4 border-gray-300 pl-3 mb-4">
               {company.description}
             </div>
           )}
 
+          <InfoRow
+            label="Headquarters Location"
+            value={company.linkedin_headquarters ?? null}
+          />
           <InfoRow label="Country" value={company.country_iso ?? null} />
           <InfoRow label="Country Tier" value={
             company.country_tier != null
@@ -120,7 +221,11 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
           } />
           <InfoRow label="TRL Level" value={
             company.trl_level != null
-              ? `${company.trl_level}${company.trl_band ? ` (${company.trl_band})` : ''}`
+              ? `${company.trl_level}${company.trl_band ? ` (${company.trl_band})` : ''}${
+                  company.trl_confidence != null
+                    ? ` · ${(company.trl_confidence * 100).toFixed(0)}% confidence`
+                    : ''
+                }`
               : null
           } />
 
@@ -139,11 +244,86 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
                   }
                 />
                 <InfoRow label="Headcount" value={company.headcount_range ?? null} />
+                <InfoRow label="Customers" value={company.customer_count_band ?? null} />
+                <InfoRow label="Current Capacity" value={company.current_capacity ?? null} />
               </div>
             </div>
           )}
 
+          {/* SMR organisation fields (smr_tt_db) */}
+          <InfoRow label="Organisation Type" value={(company.organisation_kind as string) ?? null} />
+          <InfoRow label="Ticker" value={(company.ticker as string) ?? null} />
+          <InfoRow label="Valuation" value={(company.valuation as string) ?? null} />
+          <InfoRow
+            label="Supply-chain Roles"
+            value={
+              Array.isArray(company.supply_roles) && company.supply_roles.length ? (
+                <TagList items={(company.supply_roles as string[]).map((r) => r.replace(/_/g, ' '))} />
+              ) : null
+            }
+          />
+          {Array.isArray(company.stakeholders) && company.stakeholders.length > 0 && (
+            <InfoRow
+              label="Stakeholders"
+              value={
+                <ul className="space-y-0.5">
+                  {(company.stakeholders as { name: string; relation: string; url: string | null }[]).map((s, i) => (
+                    <li key={i}>
+                      {s.url ? (
+                        <a href={s.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                          {s.name}
+                        </a>
+                      ) : (
+                        s.name
+                      )}{' '}
+                      <span className="text-xs text-gray-500">({s.relation})</span>
+                    </li>
+                  ))}
+                </ul>
+              }
+            />
+          )}
+
           <Accordion type="multiple" className="w-full">
+            {(company.role_in_supply_chain ||
+              company.critical_material_deps?.length ||
+              company.sole_source_dependency != null) && (
+              <AccordionItem value="supply-chain">
+                <AccordionTrigger className="text-sm font-semibold text-gray-700">
+                  Supply Chain Position
+                </AccordionTrigger>
+                <AccordionContent className="space-y-3">
+                  <InfoRow
+                    label="Role"
+                    value={company.role_in_supply_chain ?? null}
+                  />
+                  <InfoRow
+                    label="Role Confidence"
+                    value={
+                      company.role_in_supply_chain_confidence != null
+                        ? `${(
+                            company.role_in_supply_chain_confidence * 100
+                          ).toFixed(0)}%`
+                        : null
+                    }
+                  />
+                  <InfoRow
+                    label="Sole-Source Dependency"
+                    value={
+                      company.sole_source_dependency == null
+                        ? null
+                        : company.sole_source_dependency
+                          ? 'Yes'
+                          : 'No'
+                    }
+                  />
+                  {company.critical_material_deps?.length ? (
+                    <TagList items={company.critical_material_deps} />
+                  ) : null}
+                </AccordionContent>
+              </AccordionItem>
+            )}
+
             <AccordionItem value="risks">
               <AccordionTrigger className="text-sm font-semibold text-gray-700">
                 Risk Assessment Profiles
@@ -229,6 +409,31 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
                 </AccordionContent>
               </AccordionItem>
             ) : null}
+
+            {(company.foreign_ownership_flag != null ||
+              company.foreign_ownership_flag_reasoning) && (
+              <AccordionItem value="ownership">
+                <AccordionTrigger className="text-sm font-semibold text-gray-700">
+                  Ownership Assessment
+                </AccordionTrigger>
+                <AccordionContent className="space-y-3">
+                  <InfoRow
+                    label="Foreign Ownership Flag"
+                    value={
+                      company.foreign_ownership_flag == null
+                        ? null
+                        : company.foreign_ownership_flag
+                          ? 'Yes'
+                          : 'No'
+                    }
+                  />
+                  <InfoRow
+                    label="Assessment"
+                    value={company.foreign_ownership_flag_reasoning ?? null}
+                  />
+                </AccordionContent>
+              </AccordionItem>
+            )}
           </Accordion>
 
           <InfoRow
@@ -244,7 +449,61 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
             }
           />
 
-          {(company.relation_confidence != null ||
+          {designLinks.length > 0 && (
+            <div className="space-y-2 pb-2 border-b">
+              <h4 className="font-semibold text-sm text-gray-700">
+                Designs &amp; technologies
+              </h4>
+              <ul className="space-y-1.5">
+                {designLinks.map((design) => {
+                  const meta = [
+                    design.isReactor ? 'Reactor design' : null,
+                    design.isPrimary ? 'Primary' : null,
+                    ...design.methods,
+                    ...design.roles,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ');
+                  const body = (
+                    <>
+                      <p className="text-sm font-medium text-gray-900">
+                        {design.label}
+                      </p>
+                      <p className="font-mono text-[11px] text-gray-400">
+                        {design.nodeId}
+                      </p>
+                      {meta && (
+                        <p className="text-[11px] text-gray-500">{meta}</p>
+                      )}
+                    </>
+                  );
+                  return (
+                    <li key={design.nodeId}>
+                      {onSelectDesign ? (
+                        <button
+                          type="button"
+                          className="w-full rounded-md border border-gray-200 px-3 py-2 text-left transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          onClick={() => onSelectDesign(design.nodeId)}
+                        >
+                          {body}
+                        </button>
+                      ) : (
+                        <div className="rounded-md border border-gray-100 px-3 py-2">
+                          {body}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {(company.tech_tree_primary_node ||
+            company.tech_tree_primary_method ||
+            company.tech_tree_primary_reasoning ||
+            company.tech_tree_product_clusters?.length ||
+            company.relation_confidence != null ||
             company.relation_method != null ||
             company.relation_reasoning != null) && (
             <div className="space-y-2 pb-2 border-b">
@@ -252,6 +511,42 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
                 Tech Tree Mapping
               </h4>
               <div className="space-y-1 text-sm">
+                {company.tech_tree_primary_node && (
+                  <p>
+                    <span className="font-medium">Primary Node:</span>{' '}
+                    {onSelectDesign ? (
+                      <button
+                        type="button"
+                        className="text-blue-700 hover:underline"
+                        onClick={() =>
+                          onSelectDesign(company.tech_tree_primary_node!)
+                        }
+                      >
+                        {company.tech_tree_primary_node}
+                      </button>
+                    ) : (
+                      company.tech_tree_primary_node
+                    )}
+                  </p>
+                )}
+                {company.tech_tree_primary_method && (
+                  <p>
+                    <span className="font-medium">Primary Method:</span>{' '}
+                    {company.tech_tree_primary_method}
+                  </p>
+                )}
+                {company.tech_tree_primary_confidence != null && (
+                  <p>
+                    <span className="font-medium">Primary Confidence:</span>{' '}
+                    {(company.tech_tree_primary_confidence * 100).toFixed(0)}%
+                  </p>
+                )}
+                {company.tech_tree_primary_reasoning && (
+                  <p>
+                    <span className="font-medium">Primary Reasoning:</span>{' '}
+                    {company.tech_tree_primary_reasoning}
+                  </p>
+                )}
                 {company.relation_method && (
                   <p>
                     <span className="font-medium">Method:</span>{' '}
@@ -271,6 +566,45 @@ const CompanyDetails: React.FC<CompanyDetailsProps> = ({ company }) => {
                     <span className="font-medium">Reasoning:</span>{' '}
                     {company.relation_reasoning}
                   </p>
+                )}
+                {company.tech_tree_product_clusters?.length ? (
+                  <div className="pt-2">
+                    <span className="mb-1 block font-medium">
+                      Product Clusters
+                    </span>
+                    <TagList items={company.tech_tree_product_clusters} />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+
+          {(company.source_url ||
+            company.linkedin_url ||
+            company.trl_source_url ||
+            company.tech_tree_primary_source_url) && (
+            <div className="space-y-2 pb-2 border-b">
+              <h4 className="font-semibold text-sm text-gray-700">
+                Sources &amp; Verification
+              </h4>
+              <div className="flex flex-col gap-1 text-sm">
+                {[
+                  ['Company Source', company.source_url],
+                  ['LinkedIn', company.linkedin_url],
+                  ['TRL Evidence', company.trl_source_url],
+                  ['Mapping Evidence', company.tech_tree_primary_source_url],
+                ].map(([label, url]) =>
+                  url ? (
+                    <a
+                      key={label}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 hover:underline"
+                    >
+                      {label}
+                    </a>
+                  ) : null,
                 )}
               </div>
             </div>

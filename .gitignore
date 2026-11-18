@@ -266,5 +266,8 @@ __marimo__/
 # Folders
 simulations/outputs/*
 data/pdfs/
+data/extracted/
+kg/mongo/data/
+kg/neo4j/data/
 
 #==========================
